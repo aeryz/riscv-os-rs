@@ -1,6 +1,6 @@
 # An experimental RISC-V OS
 
-This OS is mostly for learning purposes. It started as a challenge but one of my primary goals is to also create turn this into a series of videos and blog posts.
+This OS is mostly for learning purposes. It started as a challenge but one of my primary goals is to also turn this into a series of videos and blog posts.
 
 I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to just copy code and instead actually try to live through the pain of building everything from scratch.
 
