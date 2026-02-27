@@ -37,4 +37,5 @@ TBD
 3. The official [RISC-V specification](https://docs.riscv.org/reference/isa/) is very helpful to have the full layout of the registers and basically anything related to the hardware.
 4. Very comprehensive [RISC-V course](https://www.youtube.com/watch?v=VEQL5bJeWB0&list=PLbtzT1TYeoMiKup6aoQc3V_d7OvOKc3P5&index=1) by Harry H. Porter (what a cool name). Reading the specification is not easy and can feel a bit dry. This helps you to grasp the both the RISC-V assembly and especially the necessary parts of the priviledged stuff.
 5. I use ChatGPT only for asking questions about the risc-v spec when I'm stuck. LLMs are great tools for fetching you a specific information out of huge documents. But note that, it certainly won't help to let the AI code for you in this case. The learning comes from suffering.
+6. [xv6-kernel documentation by MIT](https://pdos.csail.mit.edu/6.828/2020/xv6/book-riscv-rev1.pdf) I skim through the documentation to see their choice of algorithms. Would be a great source if you prefer to follow this course with it's source code entirely.
 
