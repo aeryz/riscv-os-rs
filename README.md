@@ -29,3 +29,12 @@ TBD
 
 ### Phase 5 (more functionality from the POSIX):
 TBD
+
+## Resources
+
+1. Huge shoutout to the [OSTEP book](https://pages.cs.wisc.edu/~remzi/OSTEP/) that let me grasp most of the OS concepts. It is a very easy to read book so I strongly recommend it. (don't forget to support the author if you can)
+2. The blog posts of [Uros Popovic](https://popovicu.com/posts/bare-metal-programming-risc-v/) made it easier to bootstrap the project by explaining the qemu RISC-V internals.
+3. The official [RISC-V specification](https://docs.riscv.org/reference/isa/) is very helpful to have the full layout of the registers and basically anything related to the hardware.
+4. Very comprehensive [RISC-V course](https://www.youtube.com/watch?v=VEQL5bJeWB0&list=PLbtzT1TYeoMiKup6aoQc3V_d7OvOKc3P5&index=1) by Harry H. Porter (what a cool name). Reading the specification is not easy and can feel a bit dry. This helps you to grasp the both the RISC-V assembly and especially the necessary parts of the priviledged stuff.
+5. I use ChatGPT only for asking questions about the risc-v spec when I'm stuck. LLMs are great tools for fetching you a specific information out of huge documents. But note that, it certainly won't help to let the AI code for you in this case. The learning comes from suffering.
+
