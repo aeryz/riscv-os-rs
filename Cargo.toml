@@ -1,6 +1,5 @@
 [workspace]
-members = ["xv6-kernel"
-]
+members = ["kernel"]
 resolver = "3"
 
 [workspace.package]

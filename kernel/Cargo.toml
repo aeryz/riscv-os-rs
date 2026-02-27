@@ -1,5 +1,5 @@
 [package]
-name = "xv6-kernel"
+name = "kernel"
 version = "0.1.0"
 license.workspace = true
 edition.workspace = true

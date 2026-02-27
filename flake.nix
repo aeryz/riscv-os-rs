@@ -1,5 +1,5 @@
 {
-  description = "xv6-riscv kernel in Rust";
+  description = "A riscv kernel, written mostly in Rust";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
