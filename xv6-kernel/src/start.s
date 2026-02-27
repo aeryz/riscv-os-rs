@@ -3,10 +3,6 @@
 _start:
     /* set up stack */
     la sp, __stack_top
-
-    /* clear .bss */
-    la t0, __bss_start
-    la t1, __bss_end
 1:
     bgeu t0, t1, 2f
     sd   zero, 0(t0)

@@ -23,15 +23,9 @@ SECTIONS
     *(.data .data.*)
   }
 
-  .bss : ALIGN(4K) {
-    __bss_start = .;
-    *(.bss .bss.*)
-    *(COMMON)
-    __bss_end = .;
-  }
-
   . = ALIGN(16);
   __stack_bottom = .;
   . = . + 0x4000;      /* reserve 16 KiB */
   __stack_top = .;
 }
+
