@@ -7,10 +7,10 @@ I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to j
 ## Non-exhaustive list of the roadmap
 
 ### Phase 1 (boot):
-- [ ] Boot into the kernel in M-mode.
-- [ ] Print to console using UART.
-- [ ] Do the necessary adjustments to `mstatus`, setup the `pmp` and switch to S-mode.
-- [ ] Setup a stub trap handler and switch to U-mode. Make sure `ecall` works.
+- [X] Boot into the kernel in M-mode.
+- [X] Print to console using UART.
+- [X] Do the necessary adjustments to `mstatus`, setup the `pmp` and switch to S-mode.
+- [X] Setup a stub trap handler and switch to U-mode. Make sure `ecall` works.
 
 ### Phase 2 (prepare for userspace programs):
 - [ ] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
