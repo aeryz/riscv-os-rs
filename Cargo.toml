@@ -1,0 +1,10 @@
+[workspace]
+members = ["xv6-kernel"
+]
+resolver = "3"
+
+[workspace.package]
+license = "GPL"
+edition = "2024"
+
+[workspace.dependencies]

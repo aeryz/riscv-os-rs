@@ -72,6 +72,7 @@
         clang
         openssl
         pkg-config
+        qemu
       ] ++ [
         rust-toolchain
         bindgen
