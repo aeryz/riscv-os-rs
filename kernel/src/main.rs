@@ -151,7 +151,7 @@ pub extern "C" fn trap_handler() -> ! {
 }
 
 #[panic_handler]
-fn pnic(_info: &PanicInfo) -> ! {
+fn panic(_info: &PanicInfo) -> ! {
     loop {
         core::hint::spin_loop();
     }
