@@ -132,7 +132,21 @@ pub extern "C" fn userspace_init() -> ! {
         .into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
 
-    unsafe { asm!("ecall",) }
+    unsafe {
+        asm!("ecall",
+            lateout("a0") _,
+            lateout("a1") _,
+            lateout("a2") _,
+            lateout("a3") _,
+            lateout("a4") _,
+            lateout("a5") _,
+            lateout("t0") _,
+        )
+    }
+
+    b"hello from the userspace after the ecall\n"
+        .into_iter()
+        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
 
     loop {
         core::hint::spin_loop();
@@ -144,6 +158,16 @@ pub extern "C" fn trap_handler() -> ! {
     b"this is a fuckin trap\n"
         .into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+
+    unsafe {
+        asm!(
+            // increment sepc to return to the next instr after `ecall`
+            "csrr t0, sepc",
+            "addi t0, t0, 4", // ecall is 4 bytes
+            "csrw sepc, t0",
+            "sret",
+        )
+    }
 
     loop {
         core::hint::spin_loop();
