@@ -59,7 +59,7 @@ pub fn enter_supervisor(entry: usize) {
             "csrw medeleg, t0",
             "csrw mideleg, t0",
 
-            "la   sp, __stack_top",
+            "la sp, __stack_top",
 
             // Allow the supervisor to read/write/execute anywhere between 0-0x2fffff..
             "li t0, 0x2fffffffffffffff",
@@ -112,6 +112,11 @@ pub fn enter_usermode(entry: usize, trap_handler: usize) {
             // setup the trap handler base address
             "csrw stvec, {trap_handler}",
 
+            // TODO: this is a temporary global kernel stack
+            // setup kernel stack
+            "la t0, __kernel_stack_top",
+            "csrw sscratch, t0",
+
             // TODO: enable scounteren
 
             "sret",
@@ -141,6 +146,7 @@ pub extern "C" fn userspace_init() -> ! {
             lateout("a4") _,
             lateout("a5") _,
             lateout("t0") _,
+            options(nostack),
         )
     }
 
@@ -161,10 +167,14 @@ pub extern "C" fn trap_handler() -> ! {
 
     unsafe {
         asm!(
+            // swap the user and kernel stacks
+            "csrrw sp, sscratch, sp",
             // increment sepc to return to the next instr after `ecall`
             "csrr t0, sepc",
             "addi t0, t0, 4", // ecall is 4 bytes
             "csrw sepc, t0",
+            // swap the user and kernel stacks back
+            "csrrw sp, sscratch, sp",
             "sret",
         )
     }
