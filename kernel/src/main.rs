@@ -6,7 +6,13 @@ use core::{
     panic::PanicInfo,
 };
 
+pub mod trap;
+
 global_asm!(include_str!("start.s"));
+
+unsafe extern "C" {
+    fn trap_entry();
+}
 
 const UART_ADDR: *mut u8 = 0x10000000 as *mut u8;
 
@@ -15,6 +21,8 @@ const XSTATUS_XPP_S: usize = 0b01 << XSTATUS_XPP_SHIFT;
 const XSTATUS_MPP_X: usize = 0b11 << XSTATUS_XPP_SHIFT;
 const XSTATUS_SIE: usize = 0b1 << 1;
 const PMP_0_CFG: usize = 0b00001111;
+
+const SYSCALL_WRITE: usize = 1;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kmain() -> ! {
@@ -84,7 +92,7 @@ pub extern "C" fn start() -> ! {
 
     enter_usermode(
         userspace_init as *const () as usize,
-        trap_handler as *const () as usize,
+        trap_entry as *const () as usize,
     );
 
     loop {
@@ -133,50 +141,39 @@ pub fn enter_usermode(entry: usize, trap_handler: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn userspace_init() -> ! {
-    b"hello from the userspace\n"
-        .into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+    let message = b"hello from the userspace\n";
+    let message_ptr = message as *const u8;
+    let message_len = message.len();
+
+    let ret: isize;
 
     unsafe {
-        asm!("ecall",
-            lateout("a0") _,
-            lateout("a1") _,
-            lateout("a2") _,
-            lateout("a3") _,
-            lateout("a4") _,
-            lateout("a5") _,
-            lateout("t0") _,
+        asm!(
+            "li a0, 1",
+            "ecall",
+            in("a7") SYSCALL_WRITE,
+            in("a1") message_ptr,
+            in("a2") message_len,
+            lateout("a0") ret,
             options(nostack),
         )
     }
 
-    b"hello from the userspace after the ecall\n"
-        .into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+    if ret != -1 {
+        let message = b"written to the kernel, cool\n";
+        let message_ptr = message as *const u8;
+        let message_len = message.len();
 
-    loop {
-        core::hint::spin_loop();
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn trap_handler() -> ! {
-    b"this is a fuckin trap\n"
-        .into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
-
-    unsafe {
-        asm!(
-            // swap the user and kernel stacks
-            "csrrw sp, sscratch, sp",
-            // increment sepc to return to the next instr after `ecall`
-            "csrr t0, sepc",
-            "addi t0, t0, 4", // ecall is 4 bytes
-            "csrw sepc, t0",
-            // swap the user and kernel stacks back
-            "csrrw sp, sscratch, sp",
-            "sret",
-        )
+        unsafe {
+            asm!(
+                "li a0, 1",
+                "ecall",
+                in("a7") SYSCALL_WRITE,
+                in("a1") message_ptr,
+                in("a2") message_len,
+                options(nostack),
+            )
+        }
     }
 
     loop {
