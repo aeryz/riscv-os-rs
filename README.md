@@ -13,7 +13,8 @@ I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to j
 - [X] Setup a stub trap handler and switch to U-mode. Make sure `ecall` works.
 
 ### Phase 2 (prepare for userspace programs):
-- [ ] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
+- [X] Implement a 4-byte aligned trampoline for the trap handler and the trap frame.
+- [X] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
 - [ ] Setup a basic page table. No allocator, just try to use page table'd accesses in the U-mode.
 - [ ] Arrange the project and isolate the inline assembly into a reusable library.
 - [ ] Make the trap handler properly handle the kernel/userspace traps and go back to the userspace code properly.
