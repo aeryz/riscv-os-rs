@@ -19,7 +19,6 @@ trap_entry:
     csrrw sp, sscratch, sp
 
     // Allocate the stack pointer to fit the trapframe
-    // TODO: maybe use sizeof(TrapFrame) here?
     addi sp, sp, -{TRAPFRAME_SIZE}
 
     // Now we can start saving the registers into the trap frame.
@@ -97,7 +96,6 @@ trap_entry:
     ld t6,  30*8(sp)
 
     // Restore the stack pointer
-    // TODO: maybe use sizeof(TrapFrame) here?
     addi sp, sp, {TRAPFRAME_SIZE}
 
     // Increment `sepc` to return to the next instr after `ecall`
