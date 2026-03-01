@@ -4,6 +4,7 @@ This OS is mostly for learning purposes. It started as a challenge but one of my
 
 I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to just copy code and instead actually try to live through the pain of building everything from scratch.
 
+
 ## Non-exhaustive list of the roadmap
 
 ### Phase 1 (boot):
@@ -39,4 +40,10 @@ TBD
 4. Very comprehensive [RISC-V course](https://www.youtube.com/watch?v=VEQL5bJeWB0&list=PLbtzT1TYeoMiKup6aoQc3V_d7OvOKc3P5&index=1) by Harry H. Porter (what a cool name). Reading the specification is not easy and can feel a bit dry. This helps you grasp the RISC-V assembly, trap handling, CSR's, etc. It's basically RISC-V spec but for humans.
 5. I use ChatGPT only for asking questions about the risc-v spec when I'm stuck. LLMs are great tools for fetching you a specific information out of huge documents. But note that, it certainly won't help to let the AI code for you in this case. The learning comes from suffering.
 6. [xv6-kernel documentation by MIT](https://pdos.csail.mit.edu/6.828/2020/xv6/book-riscv-rev1.pdf) I skim through the documentation to see their choice of algorithms. Would be a great source if you prefer to follow this course with it's source code entirely.
+
+## Contributioo
+I'm not an expert at all. I'm just learning things by doing it. So, feel free to drop an issue if you:
+- spot an error,
+- think that there is a better way of doing things,
+- have any questions. (issue labeled as "question")
 
