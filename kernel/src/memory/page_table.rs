@@ -43,7 +43,7 @@ impl PageTable {
             unsafe {
                 *page_table_ptr = PageTable::empty();
             }
-            debug(b"[l2_entry] physical address".as_slice());
+            debug(b"[l2_entry] physical address: ".as_slice());
             debug(crate::u64_to_str(pa.raw(), &mut buf));
             *l2_entry = PageTableEntry::new_pointer().set_physical_address(pa);
             if is_user {
@@ -54,6 +54,10 @@ impl PageTable {
             debug(b"l2 entry is valid\n".as_slice());
             l2_entry.physical_address().as_ptr_mut()
         };
+
+        debug(b"l1 page table address: ".as_slice());
+        debug(crate::u64_to_str(l1_page_table as u64, &mut buf));
+
         let l2_entry = &mut self.0[va.vpn_2()];
         if !l2_entry.is_valid() {
             debug(b"l2 entry still not valid\n".as_slice());

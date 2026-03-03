@@ -46,7 +46,7 @@ impl PageTableEntry {
     }
 
     pub fn physical_address(&self) -> PhysicalAddress {
-        unsafe { PhysicalAddress::from_raw_unchecked(self.0 & Self::MASK_PPN << 2) }
+        unsafe { PhysicalAddress::from_raw_unchecked((self.0 & Self::MASK_PPN) << 2) }
     }
 
     #[must_use]
