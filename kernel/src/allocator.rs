@@ -1,5 +1,3 @@
-use crate::debug;
-
 /// Dumb allocator
 ///
 /// Starting from the `start_addr`, support 64 * N pages.
@@ -32,9 +30,6 @@ impl<const N: usize> Allocator<N> {
     #[must_use]
     #[inline(never)]
     pub fn alloc(&mut self) -> Result<u64, ()> {
-        let mut buf = [0; 20];
-        debug(b"[allocator] start_addr: ");
-        debug(crate::u64_to_str(self.start_addr, &mut buf));
         for page_i in 0..self.pages.len() {
             for i in 0..u64::BITS {
                 if (self.pages[page_i] >> i) & 1 == 0 {

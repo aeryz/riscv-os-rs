@@ -39,6 +39,8 @@ unsafe extern "C" {
     static __data_start: u8;
     static __bss_start: u8;
     static __memory_start: u8;
+    static __stack_bottom: u8;
+    static __stack_top: u8;
 }
 
 pub static mut KERNEL: Kernel = Kernel {
@@ -86,28 +88,13 @@ pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
 
 impl Kernel {
     pub fn initialize(&mut self) {
-        let mut buf = [0; 20];
-        let kernel_start = unsafe { &KERNEL as *const Kernel as u64 };
-        debug(b"[kernel] kernel_start: ".as_slice());
-        debug(u64_to_str(kernel_start, &mut buf));
         let memory_start = unsafe { &__memory_start as *const u8 as u64 };
-        let mut buf = [0; 20];
-        let out = u64_to_str(memory_start, &mut buf);
-        out.into_iter()
-            .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
         self.allocator.set_start_addr(memory_start);
         self.root_page_table = self.allocator.alloc().unwrap() as *mut PageTable;
-        let mut buf = [0; 20];
-        let out = u64_to_str(self.root_page_table as u64, &mut buf);
-        out.into_iter()
-            .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
         self.initialize_page_tables();
 
-        debug(b"[kernel] right before volatile read at a weird address\n".as_slice());
-        let _ = unsafe { core::ptr::read_volatile(UART_ADDR) };
         debug(b"[kernel] right before enabling paging\n".as_slice());
         self.initiate_paging();
-        let _ = unsafe { core::ptr::read_volatile(UART_ADDR) };
         debug(b"[kernel] right after enabling paging\n".as_slice());
     }
 
@@ -128,7 +115,7 @@ impl Kernel {
 
             for _ in 0..n_text_pages {
                 (*self.root_page_table).create_identity_mapped_page(
-                    text_start + 4096,
+                    text_start,
                     &mut self.allocator,
                     page_table::Perm::Execute,
                     false,
@@ -167,6 +154,40 @@ impl Kernel {
                 false,
             );
         }
+    }
+
+    pub fn load_first_process(&mut self) {
+        // we first initiate user's root page table
+        let process_root_table = self.allocator.alloc().unwrap() as *mut PageTable;
+        unsafe { *process_root_table = PageTable::empty() };
+
+        // we don't do heap for now
+        let code_section = user_proc_1 as *const () as u64;
+        let stack_section = unsafe { &__stack_bottom as *const u8 as u64 };
+
+        unsafe {
+            (*process_root_table).create_identity_mapped_page(
+                code_section,
+                &mut self.allocator,
+                page_table::Perm::Execute,
+                true,
+            )
+        };
+
+        unsafe {
+            (*process_root_table).create_identity_mapped_page(
+                stack_section,
+                &mut self.allocator,
+                page_table::Perm::Write,
+                true,
+            )
+        };
+
+        enter_usermode(
+            user_proc_1 as *const () as usize,
+            trap_entry as *const () as usize,
+            unsafe { &__stack_top as *const u8 as usize },
+        );
     }
 
     #[inline(never)]
@@ -253,10 +274,7 @@ pub extern "C" fn start() -> ! {
 
     unsafe { KERNEL.initialize() };
 
-    enter_usermode(
-        userspace_init as *const () as usize,
-        trap_entry as *const () as usize,
-    );
+    unsafe { KERNEL.load_first_process() };
 
     loop {
         core::hint::spin_loop();
@@ -264,7 +282,7 @@ pub extern "C" fn start() -> ! {
 }
 
 #[inline(always)]
-pub fn enter_usermode(entry: usize, trap_handler: usize) {
+pub fn enter_usermode(entry: usize, trap_handler: usize, sp: usize) {
     unsafe {
         asm!(
             "csrw sepc, {entry}",
@@ -290,10 +308,12 @@ pub fn enter_usermode(entry: usize, trap_handler: usize) {
 
             // TODO: enable scounteren
 
+            "mv sp, {sp}",
             "sret",
 
             entry = in(reg) entry,
             trap_handler = in(reg) trap_handler,
+            sp = in(reg) sp,
             xpp_m = const XSTATUS_MPP_X,
             sie = const XSTATUS_SIE,
 
@@ -303,7 +323,7 @@ pub fn enter_usermode(entry: usize, trap_handler: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn userspace_init() -> ! {
+pub extern "C" fn user_proc_1() -> ! {
     let message = b"hello from the userspace\n";
     let message_ptr = message as *const u8;
     let message_len = message.len();

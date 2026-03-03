@@ -40,38 +40,53 @@ impl PageTable {
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
             debug(b"[l2_entry] is not valid\n".as_slice());
             let pa = allocator.alloc().unwrap();
-            let mut buf = [0; 20];
-            debug(b"[l2_entry] allocated: ".as_slice());
-            debug(crate::u64_to_str(pa, &mut buf));
             let page_table_ptr = pa as *mut PageTable;
-            debug(b"setting the page_table before\n".as_slice());
             unsafe {
                 *page_table_ptr = PageTable::empty();
             }
-            debug(b"setting the page_table after\n".as_slice());
             *l2_entry = PageTableEntry::new_pointer().set_physical_address(pa);
+            if is_user {
+                *l2_entry = l2_entry.set_user_accessible();
+            }
             page_table_ptr
         } else {
             debug(b"l2 entry is valid\n".as_slice());
             l2_entry.physical_address() as *mut PageTable
         };
+        let l2_entry = &mut self.0[vpn_2 as usize];
+        if !l2_entry.is_valid() {
+            debug(b"l2 entry still not valid\n".as_slice());
+        } else {
+            debug(b"l2 entry finally valid\n".as_slice());
+        }
 
-        debug(b"jumping to the l1_entry".as_slice());
         let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(vpn_1 as usize) };
         let l0_page_table: *mut PageTable = if !l1_entry.is_valid() {
+            debug(b"l1 entry is not valid\n".as_slice());
             let pa = allocator.alloc().unwrap();
             let page_table_ptr = pa as *mut PageTable;
             unsafe {
                 *page_table_ptr = PageTable::empty();
             }
             *l1_entry = PageTableEntry::new_pointer().set_physical_address(pa);
+            if is_user {
+                *l1_entry = l1_entry.set_user_accessible();
+            }
             page_table_ptr
         } else {
+            debug(b"l1 entry is valid\n".as_slice());
             l1_entry.physical_address() as *mut PageTable
         };
+        let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(vpn_1 as usize) };
+        if !l1_entry.is_valid() {
+            debug(b"l1 entry still not valid\n".as_slice());
+        } else {
+            debug(b"l1 entry finally valid\n".as_slice());
+        }
 
         let l0_entry = unsafe { (*l0_page_table).0.get_unchecked_mut(vpn_0 as usize) };
         if !l0_entry.is_valid() {
+            debug(b"l0 entry is not valid\n".as_slice());
             *l0_entry = match perm {
                 Perm::Read => l0_entry.set_readable(),
                 Perm::Write => l0_entry.set_writable(),
@@ -86,6 +101,8 @@ impl PageTable {
             if is_user {
                 *l0_entry = l0_entry.set_user_accessible();
             }
+        } else {
+            debug(b"l0 entry is valid\n".as_slice());
         }
     }
 }
