@@ -16,7 +16,7 @@ I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to j
 ### Phase 2 (prepare for userspace programs):
 - [X] Implement a 4-byte aligned trampoline for the trap handler and the trap frame.
 - [X] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
-- [ ] Setup a basic page table. No allocator, just try to use page table'd accesses in the U-mode.
+- [ ] Setup the page table with a very simple bump allocator.
 - [ ] Arrange the project and isolate the inline assembly into a reusable library.
 - [ ] Make the trap handler properly handle the kernel/userspace traps and go back to the userspace code properly.
 - [ ] Have a page allocator (haven't decided on the algorithm right now)
