@@ -1,11 +1,18 @@
 #![no_std]
 #![no_main]
+#![allow(static_mut_refs)]
 
 use core::{
     arch::{asm, global_asm},
     panic::PanicInfo,
+    ptr,
 };
 
+use crate::{allocator::Allocator, page_table::PageTable};
+
+pub mod allocator;
+pub mod page_table;
+pub mod page_table_entry;
 pub mod trap;
 
 global_asm!(include_str!("start.s"));
@@ -23,12 +30,166 @@ const XSTATUS_SIE: usize = 0b1 << 1;
 const PMP_0_CFG: usize = 0b00001111;
 
 const SYSCALL_WRITE: usize = 1;
+const SATP_MODE_SV39: u64 = 8;
+
+unsafe extern "C" {
+    static __text_start: u8;
+    static __text_end: u8;
+    static __rodata_start: u8;
+    static __data_start: u8;
+    static __bss_start: u8;
+    static __memory_start: u8;
+}
+
+pub static mut KERNEL: Kernel = Kernel {
+    allocator: Allocator::new(),
+    root_page_table: ptr::null_mut(),
+};
+
+pub struct Kernel {
+    allocator: Allocator<4>,
+    root_page_table: *mut PageTable,
+}
+
+pub fn debug(b: &[u8]) {
+    b.into_iter()
+        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+}
+
+pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
+    if buf.is_empty() {
+        return b"";
+    }
+
+    if n == 0 {
+        buf[0] = b'0';
+        buf[1] = b'\n';
+        return &buf[..2];
+    }
+
+    let mut i = 0;
+
+    while n > 0 && i < buf.len() {
+        let digit = (n % 10) as u8;
+        buf[i] = b'0' + digit;
+        n /= 10;
+        i += 1;
+    }
+
+    buf[..i].reverse();
+
+    buf[i] = b'\n';
+    i += 1;
+
+    &buf[..i]
+}
+
+impl Kernel {
+    pub fn initialize(&mut self) {
+        let mut buf = [0; 20];
+        let kernel_start = unsafe { &KERNEL as *const Kernel as u64 };
+        debug(b"[kernel] kernel_start: ".as_slice());
+        debug(u64_to_str(kernel_start, &mut buf));
+        let memory_start = unsafe { &__memory_start as *const u8 as u64 };
+        let mut buf = [0; 20];
+        let out = u64_to_str(memory_start, &mut buf);
+        out.into_iter()
+            .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+        self.allocator.set_start_addr(memory_start);
+        self.root_page_table = self.allocator.alloc().unwrap() as *mut PageTable;
+        let mut buf = [0; 20];
+        let out = u64_to_str(self.root_page_table as u64, &mut buf);
+        out.into_iter()
+            .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+        self.initialize_page_tables();
+
+        debug(b"[kernel] right before volatile read at a weird address\n".as_slice());
+        let _ = unsafe { core::ptr::read_volatile(UART_ADDR) };
+        debug(b"[kernel] right before enabling paging\n".as_slice());
+        self.initiate_paging();
+        let _ = unsafe { core::ptr::read_volatile(UART_ADDR) };
+        debug(b"[kernel] right after enabling paging\n".as_slice());
+    }
+
+    #[inline(never)]
+    pub fn initialize_page_tables(&mut self) {
+        unsafe {
+            *self.root_page_table = PageTable::empty();
+            // map the text section
+
+            let text_end = &__text_end as *const u8 as u64;
+            let mut text_start = &__text_start as *const u8 as u64;
+
+            let n_text_pages = (text_end - text_start) / 4096 + 1;
+
+            debug(b"[kernel] the text page count is: ".as_slice());
+            let mut buf = [0; 20];
+            debug(u64_to_str(n_text_pages, &mut buf));
+
+            for _ in 0..n_text_pages {
+                (*self.root_page_table).create_identity_mapped_page(
+                    text_start + 4096,
+                    &mut self.allocator,
+                    page_table::Perm::Execute,
+                    false,
+                );
+                text_start += 4096;
+            }
+
+            // map the rodata section
+            (*self.root_page_table).create_identity_mapped_page(
+                &__rodata_start as *const u8 as u64,
+                &mut self.allocator,
+                page_table::Perm::Read,
+                false,
+            );
+
+            // map the data section
+            (*self.root_page_table).create_identity_mapped_page(
+                &__data_start as *const u8 as u64,
+                &mut self.allocator,
+                page_table::Perm::Read,
+                false,
+            );
+
+            // map the bss section where the KERNEL sits
+            (*self.root_page_table).create_identity_mapped_page(
+                &__bss_start as *const u8 as u64,
+                &mut self.allocator,
+                page_table::Perm::Read,
+                false,
+            );
+
+            (*self.root_page_table).create_identity_mapped_page(
+                UART_ADDR as u64,
+                &mut self.allocator,
+                page_table::Perm::Write,
+                false,
+            );
+        }
+    }
+
+    #[inline(never)]
+    pub fn initiate_paging(&mut self) {
+        // root_pa must be 4KiB-aligned
+        let ppn = (self.root_page_table as u64) >> 12;
+        let satp = (SATP_MODE_SV39 << 60) | ppn;
+
+        unsafe {
+            asm!(
+            "csrw satp, {}",
+            // flush the tlb
+            "sfence.vma x0, x0",
+            in(reg) satp, options(nostack, preserves_flags))
+        }
+    }
+}
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kmain() -> ! {
-    // b"hello world from kernel\n"
-    //     .into_iter()
-    //     .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+    b"hello world from kernel\n"
+        .into_iter()
+        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
 
     enter_supervisor(start as *const () as usize);
 
@@ -89,6 +250,8 @@ pub extern "C" fn start() -> ! {
     b"hello from the supervisor\n"
         .into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+
+    unsafe { KERNEL.initialize() };
 
     enter_usermode(
         userspace_init as *const () as usize,
