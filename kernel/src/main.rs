@@ -8,16 +8,18 @@ use core::{
     ptr,
 };
 
-use crate::{allocator::Allocator, page_table::PageTable};
+use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
+
+use crate::memory::page_table::{self, PageTable};
 
 pub mod allocator;
-pub mod page_table;
-pub mod page_table_entry;
+pub mod memory;
 pub mod trap;
 
 global_asm!(include_str!("start.s"));
 
 unsafe extern "C" {
+    #[allow(unused)]
     fn trap_entry();
 }
 
@@ -88,9 +90,10 @@ pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
 
 impl Kernel {
     pub fn initialize(&mut self) {
-        let memory_start = unsafe { &__memory_start as *const u8 as u64 };
+        let memory_start =
+            unsafe { PhysicalAddress::from_raw_unchecked(&__memory_start as *const u8 as u64) };
         self.allocator.set_start_addr(memory_start);
-        self.root_page_table = self.allocator.alloc().unwrap() as *mut PageTable;
+        self.root_page_table = self.allocator.alloc().unwrap().as_ptr_mut();
         self.initialize_page_tables();
 
         debug(b"[kernel] right before enabling paging\n".as_slice());
@@ -105,9 +108,10 @@ impl Kernel {
             // map the text section
 
             let text_end = &__text_end as *const u8 as u64;
-            let mut text_start = &__text_start as *const u8 as u64;
+            let mut text_start =
+                PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64);
 
-            let n_text_pages = (text_end - text_start) / 4096 + 1;
+            let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
 
             debug(b"[kernel] the text page count is: ".as_slice());
             let mut buf = [0; 20];
@@ -120,12 +124,12 @@ impl Kernel {
                     page_table::Perm::Execute,
                     false,
                 );
-                text_start += 4096;
+                text_start = PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096);
             }
 
             // map the rodata section
             (*self.root_page_table).create_identity_mapped_page(
-                &__rodata_start as *const u8 as u64,
+                PhysicalAddress::from_raw_unchecked(&__rodata_start as *const u8 as u64),
                 &mut self.allocator,
                 page_table::Perm::Read,
                 false,
@@ -133,7 +137,7 @@ impl Kernel {
 
             // map the data section
             (*self.root_page_table).create_identity_mapped_page(
-                &__data_start as *const u8 as u64,
+                PhysicalAddress::from_raw_unchecked(&__data_start as *const u8 as u64),
                 &mut self.allocator,
                 page_table::Perm::Read,
                 false,
@@ -141,14 +145,14 @@ impl Kernel {
 
             // map the bss section where the KERNEL sits
             (*self.root_page_table).create_identity_mapped_page(
-                &__bss_start as *const u8 as u64,
+                PhysicalAddress::from_raw_unchecked(&__bss_start as *const u8 as u64),
                 &mut self.allocator,
                 page_table::Perm::Read,
                 false,
             );
 
             (*self.root_page_table).create_identity_mapped_page(
-                UART_ADDR as u64,
+                PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
                 &mut self.allocator,
                 page_table::Perm::Write,
                 false,
@@ -157,37 +161,37 @@ impl Kernel {
     }
 
     pub fn load_first_process(&mut self) {
-        // we first initiate user's root page table
-        let process_root_table = self.allocator.alloc().unwrap() as *mut PageTable;
-        unsafe { *process_root_table = PageTable::empty() };
+        // // we first initiate user's root page table
+        // let process_root_table = self.allocator.alloc().unwrap().as_ptr_mut();
+        // unsafe { *process_root_table = PageTable::empty() };
 
-        // we don't do heap for now
-        let code_section = user_proc_1 as *const () as u64;
-        let stack_section = unsafe { &__stack_bottom as *const u8 as u64 };
+        // // we don't do heap for now
+        // let code_section = user_proc_1 as *const () as u64;
+        // let stack_section = unsafe { &__stack_bottom as *const u8 as u64 };
 
-        unsafe {
-            (*process_root_table).create_identity_mapped_page(
-                code_section,
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                true,
-            )
-        };
+        // unsafe {
+        //     (*process_root_table).create_identity_mapped_page(
+        //         code_section,
+        //         &mut self.allocator,
+        //         page_table::Perm::Execute,
+        //         true,
+        //     )
+        // };
 
-        unsafe {
-            (*process_root_table).create_identity_mapped_page(
-                stack_section,
-                &mut self.allocator,
-                page_table::Perm::Write,
-                true,
-            )
-        };
+        // unsafe {
+        //     (*process_root_table).create_identity_mapped_page(
+        //         stack_section,
+        //         &mut self.allocator,
+        //         page_table::Perm::Write,
+        //         true,
+        //     )
+        // };
 
-        enter_usermode(
-            user_proc_1 as *const () as usize,
-            trap_entry as *const () as usize,
-            unsafe { &__stack_top as *const u8 as usize },
-        );
+        // enter_usermode(
+        //     user_proc_1 as *const () as usize,
+        //     trap_entry as *const () as usize,
+        //     unsafe { &__stack_top as *const u8 as usize },
+        // );
     }
 
     #[inline(never)]
