@@ -8,6 +8,7 @@ use crate::memory::physical_address::PhysicalAddress;
 /// It doesn't have a smart mechanism to walk through the pages.
 /// It just tries to find the next empty table by going through
 /// the `pages` bitfields.
+#[repr(C)]
 pub struct Allocator<const N: usize> {
     start_addr: PhysicalAddress,
     pages: [u64; N],

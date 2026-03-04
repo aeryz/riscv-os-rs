@@ -8,11 +8,12 @@ use core::{
     ptr,
 };
 
+use crate::helper::*;
+use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
 
-use crate::memory::page_table::{self, PageTable};
-
 pub mod allocator;
+pub mod helper;
 pub mod memory;
 pub mod trap;
 
@@ -34,15 +35,18 @@ const PMP_0_CFG: usize = 0b00001111;
 const SYSCALL_WRITE: usize = 1;
 const SATP_MODE_SV39: u64 = 8;
 
+const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
+const KERNEL_PA_BASE: u64 = 0x8020_0000;
+
 unsafe extern "C" {
     static __text_start: u8;
     static __text_end: u8;
-    static __rodata_start: u8;
-    static __data_start: u8;
-    static __bss_start: u8;
-    static __memory_start: u8;
+    // static __rodata_start: u8;
+    // static __bss_start: u8;
+    static __kernel_end: u8;
     static __stack_bottom: u8;
     static __stack_top: u8;
+    // static __kernel_stack_bottom: u8;
 }
 
 pub static mut KERNEL: Kernel = Kernel {
@@ -50,6 +54,7 @@ pub static mut KERNEL: Kernel = Kernel {
     root_page_table: ptr::null_mut(),
 };
 
+#[repr(C)]
 pub struct Kernel {
     allocator: Allocator<4>,
     root_page_table: *mut PageTable,
@@ -59,53 +64,24 @@ pub fn debug(b: &[u8]) {
     b.into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
 }
-
-pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
-    if buf.is_empty() {
-        return b"";
-    }
-
-    if n == 0 {
-        buf[0] = b'0';
-        buf[1] = b'\n';
-        return &buf[..2];
-    }
-
-    let mut i = 0;
-
-    while n > 0 && i < buf.len() {
-        let digit = (n % 10) as u8;
-        buf[i] = b'0' + digit;
-        n /= 10;
-        i += 1;
-    }
-
-    buf[..i].reverse();
-
-    buf[i] = b'\n';
-    i += 1;
-
-    &buf[..i]
-}
-
 impl Kernel {
     pub fn initialize(&mut self) {
         let memory_start =
-            unsafe { PhysicalAddress::from_raw_unchecked(&__memory_start as *const u8 as u64) };
+            unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
         self.allocator.set_start_addr(memory_start);
         self.root_page_table = self.allocator.alloc().unwrap().as_ptr_mut();
-        self.initialize_page_tables();
+        self.initialize_page_tables2();
 
         debug(b"[kernel] right before enabling paging\n".as_slice());
         self.initiate_paging();
         debug(b"[kernel] right after enabling paging\n".as_slice());
     }
 
-    #[inline(never)]
-    pub fn initialize_page_tables(&mut self) {
+    pub fn initialize_page_tables2(&mut self) {
         unsafe {
             *self.root_page_table = PageTable::empty();
-            // map the text section
+
+            (*self.root_page_table).kvm_full_map();
 
             let text_end = &__text_end as *const u8 as u64;
             let mut text_start =
@@ -126,30 +102,7 @@ impl Kernel {
                 );
                 text_start = PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096);
             }
-
-            // map the rodata section
-            (*self.root_page_table).create_identity_mapped_page(
-                PhysicalAddress::from_raw_unchecked(&__rodata_start as *const u8 as u64),
-                &mut self.allocator,
-                page_table::Perm::Read,
-                false,
-            );
-
-            // map the data section
-            (*self.root_page_table).create_identity_mapped_page(
-                PhysicalAddress::from_raw_unchecked(&__data_start as *const u8 as u64),
-                &mut self.allocator,
-                page_table::Perm::Read,
-                false,
-            );
-
-            // map the bss section where the KERNEL sits
-            (*self.root_page_table).create_identity_mapped_page(
-                PhysicalAddress::from_raw_unchecked(&__bss_start as *const u8 as u64),
-                &mut self.allocator,
-                page_table::Perm::Read,
-                false,
-            );
+            debug(b"[kernel] kvm full mapped \n".as_slice());
 
             (*self.root_page_table).create_identity_mapped_page(
                 PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
@@ -160,38 +113,41 @@ impl Kernel {
         }
     }
 
+    #[inline(never)]
     pub fn load_first_process(&mut self) {
-        // // we first initiate user's root page table
-        // let process_root_table = self.allocator.alloc().unwrap().as_ptr_mut();
-        // unsafe { *process_root_table = PageTable::empty() };
+        // we first initiate user's root page table
+        let process_root_table = self.allocator.alloc().unwrap().as_ptr_mut();
+        unsafe { *process_root_table = PageTable::empty() };
 
-        // // we don't do heap for now
-        // let code_section = user_proc_1 as *const () as u64;
-        // let stack_section = unsafe { &__stack_bottom as *const u8 as u64 };
+        // we don't do heap for now
+        let code_section =
+            unsafe { PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64) };
+        let stack_section =
+            unsafe { PhysicalAddress::from_raw_unchecked(&__stack_bottom as *const u8 as u64) };
 
-        // unsafe {
-        //     (*process_root_table).create_identity_mapped_page(
-        //         code_section,
-        //         &mut self.allocator,
-        //         page_table::Perm::Execute,
-        //         true,
-        //     )
-        // };
+        unsafe {
+            (*process_root_table).create_identity_mapped_page(
+                code_section,
+                &mut self.allocator,
+                page_table::Perm::Execute,
+                true,
+            )
+        };
 
-        // unsafe {
-        //     (*process_root_table).create_identity_mapped_page(
-        //         stack_section,
-        //         &mut self.allocator,
-        //         page_table::Perm::Write,
-        //         true,
-        //     )
-        // };
+        unsafe {
+            (*process_root_table).create_identity_mapped_page(
+                stack_section,
+                &mut self.allocator,
+                page_table::Perm::Write,
+                true,
+            )
+        };
 
-        // enter_usermode(
-        //     user_proc_1 as *const () as usize,
-        //     trap_entry as *const () as usize,
-        //     unsafe { &__stack_top as *const u8 as usize },
-        // );
+        enter_usermode(
+            user_proc_1 as *const () as usize,
+            trap_entry as *const () as usize,
+            unsafe { &__stack_top as *const u8 as usize },
+        );
     }
 
     #[inline(never)]
@@ -203,9 +159,21 @@ impl Kernel {
         unsafe {
             asm!(
             "csrw satp, {}",
+            "auipc t1, 0",
+            "li t0, {kernel_offset}",
+            "add  t0, t0, t1",
+            "jr    t0",
             // flush the tlb
             "sfence.vma x0, x0",
-            in(reg) satp, options(nostack, preserves_flags))
+            "li t0, {kernel_offset}",
+            "addi t0, t0, -0xe",
+            "add ra, ra, t0",
+            in(reg) satp,
+            // TODO: adding 0xc here is a nasty hack because above, we load the pc, then we execute a few instructions
+            // and only then we jump. 0xe moves the pointer to `sfence.vma`. But manually computing it like this is nasty
+            // and error prone. We should change it.
+            kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE + 0xe), 
+            options(nostack, preserves_flags))
         }
     }
 }
@@ -253,8 +221,6 @@ pub fn enter_supervisor(entry: usize) {
             "csrw medeleg, t0",
             "csrw mideleg, t0",
 
-            "la sp, __stack_top",
-
             // Allow the supervisor to read/write/execute anywhere between 0-0x2fffff..
             "li t0, 0x2fffffffffffffff",
             "csrw pmpaddr0, t0",
@@ -278,14 +244,14 @@ pub extern "C" fn start() -> ! {
 
     unsafe { KERNEL.initialize() };
 
-    unsafe { KERNEL.load_first_process() };
+    // unsafe { KERNEL.load_first_process() };
 
     loop {
         core::hint::spin_loop();
     }
 }
 
-#[inline(always)]
+#[inline(never)]
 pub fn enter_usermode(entry: usize, trap_handler: usize, sp: usize) {
     unsafe {
         asm!(

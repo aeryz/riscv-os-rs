@@ -31,7 +31,7 @@ impl PhysicalAddress {
     /// Safety:
     /// - `addr` must be at most `Self::MAX`
     #[must_use]
-    pub unsafe fn from_raw_unchecked(addr: u64) -> PhysicalAddress {
+    pub const unsafe fn from_raw_unchecked(addr: u64) -> PhysicalAddress {
         debug_assert!(addr <= Self::MAX);
 
         PhysicalAddress(addr)
@@ -39,8 +39,20 @@ impl PhysicalAddress {
 
     /// Returns `true` if the physical address is page(4K) aligned.
     #[must_use]
-    pub const fn is_page_aligned(&self) -> bool {
-        self.0 & 0b111111111111 == self.0
+    pub const fn is_4k_page_aligned(&self) -> bool {
+        self.0 & (4 * 1024 - 1) == self.0
+    }
+
+    /// Returns `true` if the physical address is page(2m) aligned.
+    #[must_use]
+    pub const fn is_2m_page_aligned(&self) -> bool {
+        self.0 & (2 * 1024 * 1024 - 1) == self.0
+    }
+
+    /// Returns `true` if the physical address is page(1G) aligned.
+    #[must_use]
+    pub const fn is_1g_page_aligned(&self) -> bool {
+        self.0 & (1024 * 1024 * 1024 - 1) == self.0
     }
 
     #[must_use]

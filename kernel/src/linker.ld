@@ -1,42 +1,33 @@
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
 
+KERNEL_VMA = 0xffffffff80200000;
+KERNEL_LMA = 0x80200000;
+LOAD_OFFSET = KERNEL_VMA - KERNEL_LMA;
+
 SECTIONS
 {
-  /* fw_dynamic is loaded at 0x80000000
-     TODO: check why we load at 0x80200000
-     and not some other address
-  */
-  . = 0x80200000;
-  
-  .text : ALIGN(4K) {
+  . = KERNEL_VMA;
+
+  .text : AT(ADDR(.text) - LOAD_OFFSET) {
     __text_start = .;
     KEEP(*(.text.entry))
     *(.text .text.*)
     __text_end = .;
   }
 
-  .rodata : ALIGN(4K) {
-    __rodata_start = .;
+  .rodata : AT(ADDR(.rodata) - LOAD_OFFSET) {
     *(.rodata .rodata.*)
   }
 
-  .data : ALIGN(4K) {
-    __data_start = .;
+  .data : AT(ADDR(.data) - LOAD_OFFSET) {
     *(.data .data.*)
   }
 
-  .bss : ALIGN(4K) {
-    __bss_start = .;
+  .bss (NOLOAD) : {
     *(.bss .bss.*)
     *(COMMON)
-    __bss_end = .;
   }
-
-  . = ALIGN(4K);
-  __available_memory_top = .;
-  . = . + 0x40000; /* 64 * 4K to fit 64 pages */ 
-  __available_memory_bottom = .;
 
   . = ALIGN(16);
   __kernel_stack_bottom = .;
@@ -49,6 +40,5 @@ SECTIONS
   __stack_top = .;
 
   . = ALIGN(4K);
-  __memory_start = .;
+  __kernel_end = .;
 }
-

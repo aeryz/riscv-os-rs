@@ -41,16 +41,16 @@ impl PageTableEntry {
     }
 
     #[must_use]
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         Self(0)
     }
 
-    pub fn physical_address(&self) -> PhysicalAddress {
+    pub const fn physical_address(&self) -> PhysicalAddress {
         unsafe { PhysicalAddress::from_raw_unchecked((self.0 & Self::MASK_PPN) << 2) }
     }
 
     #[must_use]
-    pub fn is_valid(&self) -> bool {
+    pub const fn is_valid(&self) -> bool {
         self.0 & Self::FLAG_V == 1
     }
 
@@ -112,7 +112,7 @@ impl PageTableEntry {
     #[must_use]
     pub fn set_physical_address(mut self, addr: PhysicalAddress) -> Self {
         debug_assert!(
-            addr.is_page_aligned(),
+            addr.is_4k_page_aligned(),
             "Physical address must be 4K-aligned"
         );
         let offset_stripped = addr.raw() >> 12;
