@@ -15,18 +15,20 @@
 pub struct VirtualAddress(u64);
 
 impl VirtualAddress {
-    pub const BITS: u64 = 38;
-    pub const MAX: u64 = (1 << Self::BITS) - 1;
+    pub const BITS: u64 = 39;
 
     const MASK: u64 = 0b111111111;
 
     #[must_use]
     pub fn from_raw(addr: u64) -> Result<Self, ()> {
-        if addr > Self::MAX {
-            return Err(());
-        }
+        let sign = (addr >> (Self::BITS - 1)) & 1;
+        let upper = addr >> Self::BITS;
 
-        Ok(VirtualAddress(addr))
+        if (sign == 0 && upper == 0) || (sign == 1 && upper == (1 << 25) - 1) {
+            Ok(VirtualAddress(addr))
+        } else {
+            Err(())
+        }
     }
 
     #[must_use]
@@ -42,5 +44,20 @@ impl VirtualAddress {
     #[must_use]
     pub const fn vpn_0(&self) -> usize {
         ((self.0 >> 12) & Self::MASK) as usize
+    }
+
+    #[must_use]
+    pub const fn as_ptr_mut<T>(&self) -> *mut T {
+        self.0 as *mut T
+    }
+
+    #[must_use]
+    pub const fn as_ptr<T>(&self) -> *const T {
+        self.0 as *const T
+    }
+
+    #[must_use]
+    pub const fn raw(&self) -> u64 {
+        self.0
     }
 }

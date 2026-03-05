@@ -4,11 +4,11 @@
 
 use core::{
     arch::{asm, global_asm},
-    panic::PanicInfo,
+    panic::{PanicInfo},
     ptr,
 };
 
-use crate::helper::*;
+use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
 
@@ -30,11 +30,13 @@ const XSTATUS_XPP_SHIFT: usize = 11;
 const XSTATUS_XPP_S: usize = 0b01 << XSTATUS_XPP_SHIFT;
 const XSTATUS_MPP_X: usize = 0b11 << XSTATUS_XPP_SHIFT;
 const XSTATUS_SIE: usize = 0b1 << 1;
+const XSTATUS_SUM: usize = 0b1 << 18;
 const PMP_0_CFG: usize = 0b00001111;
 
 const SYSCALL_WRITE: usize = 1;
 const SATP_MODE_SV39: u64 = 8;
 
+const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffc0_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
 const KERNEL_PA_BASE: u64 = 0x8020_0000;
 
@@ -64,90 +66,55 @@ pub fn debug(b: &[u8]) {
     b.into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
 }
+
 impl Kernel {
     pub fn initialize(&mut self) {
         let memory_start =
             unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
         self.allocator.set_start_addr(memory_start);
-        self.root_page_table = self.allocator.alloc().unwrap().as_ptr_mut();
-        self.initialize_page_tables2();
+
+        self.initialize_page_tables();
+    }
+
+    pub fn initialize_page_tables(&mut self) {
+        let root_page_table: &mut PageTable = unsafe { &mut *self.allocator.alloc().unwrap().as_ptr_mut() };
+
+        *root_page_table = PageTable::empty();
+        root_page_table.kvm_full_map();
+
+        let text_end = unsafe {&__text_end as *const u8 as u64 };
+        let mut text_start = unsafe {
+            PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64) };
+
+        let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
+
+        debug(b"[kernel] the text page count is: ".as_slice());
+        let mut buf = [0; 20];
+        debug(u64_to_str(n_text_pages, &mut buf));
+
+        for _ in 0..n_text_pages {
+            root_page_table.create_identity_mapped_page(
+                text_start,
+                &mut self.allocator,
+                page_table::Perm::Execute,
+                false,
+            );
+            text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
+        }
+        debug(b"[kernel] kvm full mapped \n".as_slice());
+
+        root_page_table.create_identity_mapped_page(
+            unsafe { PhysicalAddress::from_raw_unchecked(UART_ADDR as u64) },
+            &mut self.allocator,
+            page_table::Perm::Write,
+            false,
+        );
+
+        self.root_page_table = root_page_table;
 
         debug(b"[kernel] right before enabling paging\n".as_slice());
         self.initiate_paging();
         debug(b"[kernel] right after enabling paging\n".as_slice());
-    }
-
-    pub fn initialize_page_tables2(&mut self) {
-        unsafe {
-            *self.root_page_table = PageTable::empty();
-
-            (*self.root_page_table).kvm_full_map();
-
-            let text_end = &__text_end as *const u8 as u64;
-            let mut text_start =
-                PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64);
-
-            let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
-
-            debug(b"[kernel] the text page count is: ".as_slice());
-            let mut buf = [0; 20];
-            debug(u64_to_str(n_text_pages, &mut buf));
-
-            for _ in 0..n_text_pages {
-                (*self.root_page_table).create_identity_mapped_page(
-                    text_start,
-                    &mut self.allocator,
-                    page_table::Perm::Execute,
-                    false,
-                );
-                text_start = PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096);
-            }
-            debug(b"[kernel] kvm full mapped \n".as_slice());
-
-            (*self.root_page_table).create_identity_mapped_page(
-                PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
-                &mut self.allocator,
-                page_table::Perm::Write,
-                false,
-            );
-        }
-    }
-
-    #[inline(never)]
-    pub fn load_first_process(&mut self) {
-        // we first initiate user's root page table
-        let process_root_table = self.allocator.alloc().unwrap().as_ptr_mut();
-        unsafe { *process_root_table = PageTable::empty() };
-
-        // we don't do heap for now
-        let code_section =
-            unsafe { PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64) };
-        let stack_section =
-            unsafe { PhysicalAddress::from_raw_unchecked(&__stack_bottom as *const u8 as u64) };
-
-        unsafe {
-            (*process_root_table).create_identity_mapped_page(
-                code_section,
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                true,
-            )
-        };
-
-        unsafe {
-            (*process_root_table).create_identity_mapped_page(
-                stack_section,
-                &mut self.allocator,
-                page_table::Perm::Write,
-                true,
-            )
-        };
-
-        enter_usermode(
-            user_proc_1 as *const () as usize,
-            trap_entry as *const () as usize,
-            unsafe { &__stack_top as *const u8 as usize },
-        );
     }
 
     #[inline(never)]
@@ -161,12 +128,13 @@ impl Kernel {
             "csrw satp, {}",
             "auipc t1, 0",
             "li t0, {kernel_offset}",
-            "add  t0, t0, t1",
-            "jr    t0",
+            "add t0, t0, t1",
+            "jr  t0",
             // flush the tlb
             "sfence.vma x0, x0",
             "li t0, {kernel_offset}",
             "addi t0, t0, -0xe",
+            "add sp, sp, t0",
             "add ra, ra, t0",
             in(reg) satp,
             // TODO: adding 0xc here is a nasty hack because above, we load the pc, then we execute a few instructions
@@ -176,6 +144,119 @@ impl Kernel {
             options(nostack, preserves_flags))
         }
     }
+
+    #[inline(never)]
+    pub fn load_first_process(&mut self) {
+        let mut buf = [0; 20];
+        debug(b"loading the first user process\n".as_slice());
+        // we first initiate user's root page table
+        let process_root_table_pa = self.allocator.alloc().unwrap();
+        let process_root_table_va = VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+        let process_root_table = process_root_table_va.as_ptr_mut();
+        unsafe { *process_root_table = PageTable::empty() };
+
+        // we don't do heap for now
+        let code_section_at_kernel = user_proc_1 as *const u8;
+        debug(b"[ + ] user proc: ".as_slice());
+        debug(u64_to_str_hex(code_section_at_kernel as u64, &mut buf));
+
+        let code_section_pa = self.allocator.alloc().unwrap();
+        let code_section_va = VirtualAddress::from_raw(code_section_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+        debug(b"[...] copying the user code\n".as_slice());
+        (0..46).for_each(|i| {
+            unsafe {
+                *((code_section_va.raw() + i) as *mut u8) = *(code_section_at_kernel.add(i as usize));
+            }
+        });
+        debug(b"[ + ] copied the user code\n".as_slice());
+
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_0001_0000).unwrap(),
+                code_section_pa,
+                &mut self.allocator,
+                page_table::Perm::Execute,
+                true,
+            )
+        };
+        debug(b"[ + ] after\n".as_slice());
+
+        let user_stack = self.allocator.alloc().unwrap();
+
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_3fff_0000).unwrap(),
+                user_stack,
+                &mut self.allocator,
+                page_table::Perm::Write,
+                true,
+            )
+        };
+
+        let kernel_stack = self.allocator.alloc().unwrap(); 
+
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_3fff_2000).unwrap(),
+                kernel_stack,
+                &mut self.allocator,
+                page_table::Perm::Write,
+                false,
+            )
+        };
+
+        let text_end = unsafe {&__text_end as *const u8 as u64 };
+        let mut text_start = unsafe { VirtualAddress::from_raw(&__text_start as *const u8 as u64).unwrap() };
+
+        let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
+
+        for _ in 0..n_text_pages {
+            debug(b"mapping: ".as_slice());
+            debug(u64_to_str_hex(text_start.raw(), &mut buf));
+            debug(b"\tinto -> ".as_slice());
+            debug(u64_to_str_hex(PhysicalAddress::from_raw(text_start.raw() - 0xffff_ffff_0000_0000).unwrap().raw(), &mut buf));
+            unsafe {
+                (*process_root_table).map_user_memory(
+                    text_start,
+                    PhysicalAddress::from_raw(text_start.raw() - 0xffff_ffff_0000_0000).unwrap(),
+                    &mut self.allocator,
+                    page_table::Perm::Execute,
+                    false,
+                );
+            }
+            text_start = VirtualAddress::from_raw(text_start.raw() + 4096).unwrap();
+        }
+
+        let trap_entry =
+            unsafe { PhysicalAddress::from_raw_unchecked(trap_entry as *const () as u64 - 0xffff_ffff_0000_0000) };
+        debug(b"trampoline: ".as_slice());
+        debug(u64_to_str_hex(trap_entry.raw(), &mut buf));
+
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_3fff_2000).unwrap(),
+                trap_entry,
+                &mut self.allocator,
+                page_table::Perm::Execute,
+                false,
+            )
+        }
+
+        debug(b"right after mapping the user memory".as_slice());
+
+        debug(b"the current process root table: ".as_slice());
+        debug(u64_to_str_hex(process_root_table_pa.raw() as u64, &mut buf));
+
+        enter_usermode(
+            0x0000_0000_0001_0000,
+            trap_entry.raw() as usize,
+            0x0000_0000_3fff_1000,
+            0x0000_0000_3fff_3000,
+            process_root_table_pa.raw() as usize,
+            self.root_page_table as usize,
+        );
+    }
+
 }
 
 #[unsafe(no_mangle)]
@@ -238,13 +319,13 @@ pub fn enter_supervisor(entry: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> ! {
-    b"hello from the supervisor\n"
-        .into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+    debug(b"hello from the supervisor\n".as_slice());
 
     unsafe { KERNEL.initialize() };
 
-    // unsafe { KERNEL.load_first_process() };
+    debug(b"calling load\n".as_slice());
+
+    unsafe { KERNEL.load_first_process() };
 
     loop {
         core::hint::spin_loop();
@@ -252,7 +333,10 @@ pub extern "C" fn start() -> ! {
 }
 
 #[inline(never)]
-pub fn enter_usermode(entry: usize, trap_handler: usize, sp: usize) {
+pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kernel_stack: usize, user_satp: usize, kernel_satp: usize) {
+    let ppn = (user_satp as u64) >> 12;
+    let user_satp = (SATP_MODE_SV39 << 60) | ppn;
+
     unsafe {
         asm!(
             "csrw sepc, {entry}",
@@ -265,27 +349,39 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, sp: usize) {
 
             // enable trap handler
             "ori t0, t0, {sie}",
+            // s-mode can access user accessible pages
+            "or t0, t0, {sum}",
 
             "csrw sstatus, t0",
 
             // setup the trap handler base address
             "csrw stvec, {trap_handler}",
 
-            // TODO: this is a temporary global kernel stack
             // setup kernel stack
-            "la t0, __kernel_stack_top",
+            "mv t0, {kernel_sp}",
             "csrw sscratch, t0",
+
+            "addi t0, t0, 8",
+            "mv t1, {kernel_satp}",
+            "sd t1, 0(sp)",
 
             // TODO: enable scounteren
 
             "mv sp, {sp}",
+
+            "csrw satp, {user_satp}",
+            "sfence.vma x0, x0",
             "sret",
 
             entry = in(reg) entry,
             trap_handler = in(reg) trap_handler,
-            sp = in(reg) sp,
+            sp = in(reg) user_stack,
+            user_satp = in(reg) user_satp,
+            kernel_sp = in(reg) kernel_stack,
+            kernel_satp = in(reg) kernel_satp,
             xpp_m = const XSTATUS_MPP_X,
             sie = const XSTATUS_SIE,
+            sum = in(reg) XSTATUS_SUM,
 
             options(noreturn)
         )
