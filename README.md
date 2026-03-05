@@ -16,7 +16,7 @@ I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to j
 ### Phase 2 (prepare for userspace programs):
 - [X] Implement a 4-byte aligned trampoline for the trap handler and the trap frame.
 - [X] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
-- [ ] Setup the page table with a very simple bump allocator.
+- [X] Setup the page table with a very simple bump allocator.
 - [ ] Arrange the project and isolate the inline assembly into a reusable library.
 - [ ] Make the trap handler properly handle the kernel/userspace traps and go back to the userspace code properly.
 - [ ] Have a page allocator (haven't decided on the algorithm right now)
@@ -41,7 +41,7 @@ TBD
 5. I use ChatGPT only for asking questions about the risc-v spec when I'm stuck. LLMs are great tools for fetching you a specific information out of huge documents. But note that, it certainly won't help to let the AI code for you in this case. The learning comes from suffering.
 6. [xv6-kernel documentation by MIT](https://pdos.csail.mit.edu/6.828/2020/xv6/book-riscv-rev1.pdf) I skim through the documentation to see their choice of algorithms. Would be a great source if you prefer to follow this course with it's source code entirely.
 
-## Contributioo
+## Contribution
 I'm not an expert at all. I'm just learning things by doing it. So, feel free to drop an issue if you:
 - spot an error,
 - think that there is a better way of doing things,
