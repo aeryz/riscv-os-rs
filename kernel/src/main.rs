@@ -193,6 +193,16 @@ impl Kernel {
             )
         };
 
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(UART_ADDR as u64).unwrap(),
+                PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
+                &mut self.allocator,
+                page_table::Perm::Write,
+                true,
+            )
+        };
+
         let kernel_stack = self.allocator.alloc().unwrap(); 
 
         unsafe {
@@ -249,9 +259,9 @@ impl Kernel {
 
         enter_usermode(
             0x0000_0000_0001_0000,
-            trap_entry.raw() as usize,
-            0x0000_0000_3fff_1000,
-            0x0000_0000_3fff_3000,
+            0x0000_0000_3fff_2000,
+            0x0000_0000_3fff_0fff,
+            0x0000_0000_3fff_2fff,
             process_root_table_pa.raw() as usize,
             self.root_page_table as usize,
         );
@@ -359,11 +369,10 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
 
             // setup kernel stack
             "mv t0, {kernel_sp}",
+            // TODO: enable kernel satp saving
+            // "mv t1, {kernel_satp}",
+            // "sd t1, 0(t0)",
             "csrw sscratch, t0",
-
-            "addi t0, t0, 8",
-            "mv t1, {kernel_satp}",
-            "sd t1, 0(sp)",
 
             // TODO: enable scounteren
 
@@ -378,7 +387,7 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
             sp = in(reg) user_stack,
             user_satp = in(reg) user_satp,
             kernel_sp = in(reg) kernel_stack,
-            kernel_satp = in(reg) kernel_satp,
+            // kernel_satp = in(reg) kernel_satp,
             xpp_m = const XSTATUS_MPP_X,
             sie = const XSTATUS_SIE,
             sum = in(reg) XSTATUS_SUM,
@@ -390,6 +399,9 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
 
 #[unsafe(no_mangle)]
 pub extern "C" fn user_proc_1() -> ! {
+    unsafe { *UART_ADDR  = b'A'  }; 
+    unsafe { *UART_ADDR  = b'B' }; 
+    unsafe { *UART_ADDR  = b'C' }; 
     let message = b"hello from the userspace\n";
     let message_ptr = message as *const u8;
     let message_len = message.len();
