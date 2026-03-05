@@ -97,7 +97,6 @@ impl Kernel {
                 text_start,
                 &mut self.allocator,
                 page_table::Perm::Execute,
-                false,
             );
             text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
         }
@@ -107,7 +106,6 @@ impl Kernel {
             unsafe { PhysicalAddress::from_raw_unchecked(UART_ADDR as u64) },
             &mut self.allocator,
             page_table::Perm::Write,
-            false,
         );
 
         self.root_page_table = root_page_table;
@@ -162,7 +160,8 @@ impl Kernel {
 
         let code_section_pa = self.allocator.alloc().unwrap();
         let code_section_va = VirtualAddress::from_raw(code_section_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
-        debug(b"[...] copying the user code\n".as_slice());
+        debug(b"[...] copying the user code: ".as_slice());
+        debug(u64_to_str_hex(code_section_pa.raw(), &mut buf));
         (0..46).for_each(|i| {
             unsafe {
                 *((code_section_va.raw() + i) as *mut u8) = *(code_section_at_kernel.add(i as usize));
@@ -199,7 +198,7 @@ impl Kernel {
                 PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
                 &mut self.allocator,
                 page_table::Perm::Write,
-                true,
+                false,
             )
         };
 
@@ -221,7 +220,7 @@ impl Kernel {
         let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
 
         for _ in 0..n_text_pages {
-            debug(b"mapping: ".as_slice());
+            debug(b"mapping kernel code: ".as_slice());
             debug(u64_to_str_hex(text_start.raw(), &mut buf));
             debug(b"\tinto -> ".as_slice());
             debug(u64_to_str_hex(PhysicalAddress::from_raw(text_start.raw() - 0xffff_ffff_0000_0000).unwrap().raw(), &mut buf));

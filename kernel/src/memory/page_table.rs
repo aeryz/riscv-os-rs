@@ -61,7 +61,6 @@ impl PageTable {
         addr: PhysicalAddress,
         allocator: &mut Allocator<N>,
         perm: Perm,
-        is_user: bool,
     ) {
         let mut buf = [0; 20];
         debug(b"entered identity map\n".as_slice());
@@ -83,9 +82,6 @@ impl PageTable {
                 *page_table_ptr = PageTable::empty();
             }
             *l2_entry = PageTableEntry::new_pointer().set_physical_address(pa);
-            if is_user {
-                *l2_entry = l2_entry.set_user_accessible();
-            }
             page_table_ptr
         } else {
             l2_entry.physical_address().as_ptr_mut()
@@ -99,9 +95,6 @@ impl PageTable {
                 *page_table_ptr = PageTable::empty();
             }
             *l1_entry = PageTableEntry::new_pointer().set_physical_address(pa);
-            if is_user {
-                *l1_entry = l1_entry.set_user_accessible();
-            }
             page_table_ptr
         } else {
             l1_entry.physical_address().as_ptr_mut()
@@ -119,10 +112,6 @@ impl PageTable {
             .set_physical_address(addr)
             .set_dirty()
             .set_accessed();
-
-            if is_user {
-                *l0_entry = l0_entry.set_user_accessible();
-            }
         }
     }
 
@@ -150,9 +139,6 @@ impl PageTable {
                 *page_table_ptr = PageTable::empty();
             }
             *l2_entry = PageTableEntry::new_pointer().set_physical_address(pa);
-            if is_user {
-                *l2_entry = l2_entry.set_user_accessible();
-            }
             page_table_ptr
         } else {
             (l2_entry.physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE) as *mut PageTable
@@ -160,7 +146,6 @@ impl PageTable {
 
         let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(va.vpn_1()) };
         let l0_page_table: *mut PageTable = if !l1_entry.is_valid() {
-            debug(b"entry not valid\n".as_slice());
             let pa = allocator.alloc().unwrap();
             let va = VirtualAddress::from_raw(pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
             let page_table_ptr = va.as_ptr_mut();
@@ -168,9 +153,6 @@ impl PageTable {
                 *page_table_ptr = PageTable::empty();
             }
             *l1_entry = PageTableEntry::new_pointer().set_physical_address(pa);
-            if is_user {
-                *l1_entry = l1_entry.set_user_accessible();
-            }
             page_table_ptr
         } else {
             (l1_entry.physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE) as *mut PageTable
