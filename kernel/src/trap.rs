@@ -58,6 +58,13 @@ trap_entry:
 
     csrr t0, scause
     sd t0, 31*8(sp)
+
+    // Load the kernel satp to t0
+    ld t0, 32*8(sp)
+
+    // Switch to the kernel satp
+    csrw satp, t0
+    sfence.vma x0, x0
     
     // Move the trap frame (sitting at sp) as the first param
     mv a0, sp

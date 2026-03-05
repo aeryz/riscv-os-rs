@@ -192,21 +192,11 @@ impl Kernel {
             )
         };
 
-        unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(UART_ADDR as u64).unwrap(),
-                PhysicalAddress::from_raw_unchecked(UART_ADDR as u64),
-                &mut self.allocator,
-                page_table::Perm::Write,
-                false,
-            )
-        };
-
         let kernel_stack = self.allocator.alloc().unwrap(); 
 
         unsafe {
             (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_3fff_2000).unwrap(),
+                VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap(),
                 kernel_stack,
                 &mut self.allocator,
                 page_table::Perm::Write,
@@ -243,7 +233,7 @@ impl Kernel {
 
         unsafe {
             (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_3fff_2000).unwrap(),
+                VirtualAddress::from_raw(trap_entry.raw() + 0xffff_ffff_0000_0000).unwrap(),
                 trap_entry,
                 &mut self.allocator,
                 page_table::Perm::Execute,
@@ -258,11 +248,10 @@ impl Kernel {
 
         enter_usermode(
             0x0000_0000_0001_0000,
-            0x0000_0000_3fff_2000,
-            0x0000_0000_3fff_0fff,
-            0x0000_0000_3fff_2fff,
+            (trap_entry.raw() + 0xffff_ffff_0000_0000) as usize,
+            0x0000_0000_3fff_0fa0,
+            (kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE + 0xfa0) as usize,
             process_root_table_pa.raw() as usize,
-            self.root_page_table as usize,
         );
     }
 
@@ -342,12 +331,18 @@ pub extern "C" fn start() -> ! {
 }
 
 #[inline(never)]
-pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kernel_stack: usize, user_satp: usize, kernel_satp: usize) {
+pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kernel_stack: usize, user_satp: usize) {
     let ppn = (user_satp as u64) >> 12;
     let user_satp = (SATP_MODE_SV39 << 60) | ppn;
 
     unsafe {
         asm!(
+            // save the kernel satp for later
+            "csrr t2, satp",
+            // first switch to the user satp
+            "csrw satp, {user_satp}",
+            "sfence.vma x0, x0",
+
             "csrw sepc, {entry}",
 
             "csrr t0, sstatus",
@@ -368,17 +363,12 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
 
             // setup kernel stack
             "mv t0, {kernel_sp}",
-            // TODO: enable kernel satp saving
-            // "mv t1, {kernel_satp}",
-            // "sd t1, 0(t0)",
+            "sd t2, 0(t0)",
             "csrw sscratch, t0",
 
             // TODO: enable scounteren
 
             "mv sp, {sp}",
-
-            "csrw satp, {user_satp}",
-            "sfence.vma x0, x0",
             "sret",
 
             entry = in(reg) entry,
@@ -386,7 +376,6 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
             sp = in(reg) user_stack,
             user_satp = in(reg) user_satp,
             kernel_sp = in(reg) kernel_stack,
-            // kernel_satp = in(reg) kernel_satp,
             xpp_m = const XSTATUS_MPP_X,
             sie = const XSTATUS_SIE,
             sum = in(reg) XSTATUS_SUM,
@@ -398,9 +387,6 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
 
 #[unsafe(no_mangle)]
 pub extern "C" fn user_proc_1() -> ! {
-    unsafe { *UART_ADDR  = b'A'  }; 
-    unsafe { *UART_ADDR  = b'B' }; 
-    unsafe { *UART_ADDR  = b'C' }; 
     let message = b"hello from the userspace\n";
     let message_ptr = message as *const u8;
     let message_len = message.len();
