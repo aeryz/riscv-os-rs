@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 
-use crate::{SYSCALL_WRITE, UART_ADDR};
+use crate::{SYSCALL_WRITE, UART_PHYSICAL_ADDR, debug};
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
 // This is required because:
@@ -59,12 +59,10 @@ trap_entry:
     csrr t0, scause
     sd t0, 31*8(sp)
 
-    // Load the kernel satp to t0
-    ld t0, 32*8(sp)
-
-    // Switch to the kernel satp
-    csrw satp, t0
-    sfence.vma x0, x0
+    // TODO: we used to switch satp but now we map the whole kernel to userspace as well
+    // ld t0, 32*8(sp)
+    // csrw satp, t0
+    // sfence.vma x0, x0
     
     // Move the trap frame (sitting at sp) as the first param
     mv a0, sp
@@ -170,9 +168,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
                 let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
 
-                utf8_str.into_iter().for_each(|b| unsafe {
-                    core::ptr::write_volatile(UART_ADDR, *b);
-                });
+                debug(utf8_str);
 
                 trap_frame.a0 = count;
             }

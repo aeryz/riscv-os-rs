@@ -3,9 +3,7 @@
 #![allow(static_mut_refs)]
 
 use core::{
-    arch::{asm, global_asm},
-    panic::{PanicInfo},
-    ptr,
+    arch::{asm, global_asm}, cell::RefCell, panic::PanicInfo, ptr
 };
 
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
@@ -24,7 +22,7 @@ unsafe extern "C" {
     fn trap_entry();
 }
 
-const UART_ADDR: *mut u8 = 0x10000000 as *mut u8;
+const UART_PHYSICAL_ADDR: u64 = 0x10000000;
 
 const XSTATUS_XPP_SHIFT: usize = 11;
 const XSTATUS_XPP_S: usize = 0b01 << XSTATUS_XPP_SHIFT;
@@ -36,7 +34,8 @@ const PMP_0_CFG: usize = 0b00001111;
 const SYSCALL_WRITE: usize = 1;
 const SATP_MODE_SV39: u64 = 8;
 
-const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffc0_0000_0000;
+const KERNEL_VMALLOC_BASE: u64 = 0xffff_ffc6_0000_0000;
+const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
 const KERNEL_PA_BASE: u64 = 0x8020_0000;
 
@@ -54,20 +53,37 @@ unsafe extern "C" {
 pub static mut KERNEL: Kernel = Kernel {
     allocator: Allocator::new(),
     root_page_table: ptr::null_mut(),
+    uart_addr: UART_PHYSICAL_ADDR,
 };
 
 #[repr(C)]
 pub struct Kernel {
     allocator: Allocator<4>,
     root_page_table: *mut PageTable,
+    uart_addr: u64,
 }
 
-pub fn debug(b: &[u8]) {
-    b.into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+pub fn debug<T: AsRef<[u8]>>(b: T) {
+    let satp: u64;
+    unsafe {
+        asm!(
+            "csrr {0}, satp",
+            out(reg) satp,
+        )
+    };
+
+    let uart_addr = if satp == 0 {
+        UART_PHYSICAL_ADDR
+    } else {
+        UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE
+    };
+
+    b.as_ref().into_iter()
+        .for_each(|b| unsafe { core::ptr::write_volatile(uart_addr as *mut u8, *b) });
 }
 
 impl Kernel {
+
     pub fn initialize(&mut self) {
         let memory_start =
             unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
@@ -88,7 +104,7 @@ impl Kernel {
 
         let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
 
-        debug(b"[kernel] the text page count is: ".as_slice());
+        debug(b"[kernel] the text page count is: ");
         let mut buf = [0; 20];
         debug(u64_to_str(n_text_pages, &mut buf));
 
@@ -100,19 +116,13 @@ impl Kernel {
             );
             text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
         }
-        debug(b"[kernel] kvm full mapped \n".as_slice());
-
-        root_page_table.create_identity_mapped_page(
-            unsafe { PhysicalAddress::from_raw_unchecked(UART_ADDR as u64) },
-            &mut self.allocator,
-            page_table::Perm::Write,
-        );
+        debug(b"[kernel] kvm full mapped \n");
 
         self.root_page_table = root_page_table;
 
-        debug(b"[kernel] right before enabling paging\n".as_slice());
+        debug(b"[kernel] right before enabling paging\n");
         self.initiate_paging();
-        debug(b"[kernel] right after enabling paging\n".as_slice());
+        debug(b"[kernel] right after enabling paging\n");
     }
 
     #[inline(never)]
@@ -146,7 +156,7 @@ impl Kernel {
     #[inline(never)]
     pub fn load_first_process(&mut self) {
         let mut buf = [0; 20];
-        debug(b"loading the first user process\n".as_slice());
+        debug(b"loading the first user process\n");
         // we first initiate user's root page table
         let process_root_table_pa = self.allocator.alloc().unwrap();
         let process_root_table_va = VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
@@ -154,31 +164,26 @@ impl Kernel {
         unsafe { *process_root_table = PageTable::empty() };
 
         // we don't do heap for now
-        let code_section_at_kernel = user_proc_1 as *const u8;
-        debug(b"[ + ] user proc: ".as_slice());
-        debug(u64_to_str_hex(code_section_at_kernel as u64, &mut buf));
-
-        let code_section_pa = self.allocator.alloc().unwrap();
-        let code_section_va = VirtualAddress::from_raw(code_section_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
-        debug(b"[...] copying the user code: ".as_slice());
-        debug(u64_to_str_hex(code_section_pa.raw(), &mut buf));
-        (0..46).for_each(|i| {
-            unsafe {
-                *((code_section_va.raw() + i) as *mut u8) = *(code_section_at_kernel.add(i as usize));
-            }
-        });
-        debug(b"[ + ] copied the user code\n".as_slice());
-
+        // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
         unsafe {
             (*process_root_table).map_user_memory(
                 VirtualAddress::from_raw(0x0000_0000_0001_0000).unwrap(),
-                code_section_pa,
+                PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000),
                 &mut self.allocator,
                 page_table::Perm::Execute,
                 true,
             )
         };
-        debug(b"[ + ] after\n".as_slice());
+        // TODO: this mapping is also needed since the `user_proc_1` refers to addresses between 0x11000-0x12000
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_0001_1000).unwrap(),
+                PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000 + 0x1000),
+                &mut self.allocator,
+                page_table::Perm::Read,
+                true,
+            )
+        };
 
         let user_stack = self.allocator.alloc().unwrap();
 
@@ -204,51 +209,18 @@ impl Kernel {
             )
         };
 
-        let text_end = unsafe {&__text_end as *const u8 as u64 };
-        let mut text_start = unsafe { VirtualAddress::from_raw(&__text_start as *const u8 as u64).unwrap() };
-
-        let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
-
-        for _ in 0..n_text_pages {
-            debug(b"mapping kernel code: ".as_slice());
-            debug(u64_to_str_hex(text_start.raw(), &mut buf));
-            debug(b"\tinto -> ".as_slice());
-            debug(u64_to_str_hex(PhysicalAddress::from_raw(text_start.raw() - 0xffff_ffff_0000_0000).unwrap().raw(), &mut buf));
-            unsafe {
-                (*process_root_table).map_user_memory(
-                    text_start,
-                    PhysicalAddress::from_raw(text_start.raw() - 0xffff_ffff_0000_0000).unwrap(),
-                    &mut self.allocator,
-                    page_table::Perm::Execute,
-                    false,
-                );
-            }
-            text_start = VirtualAddress::from_raw(text_start.raw() + 4096).unwrap();
-        }
-
-        let trap_entry =
-            unsafe { PhysicalAddress::from_raw_unchecked(trap_entry as *const () as u64 - 0xffff_ffff_0000_0000) };
-        debug(b"trampoline: ".as_slice());
-        debug(u64_to_str_hex(trap_entry.raw(), &mut buf));
-
         unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(trap_entry.raw() + 0xffff_ffff_0000_0000).unwrap(),
-                trap_entry,
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                false,
-            )
+            (*process_root_table).kvm_full_map();
         }
 
-        debug(b"right after mapping the user memory".as_slice());
+        debug(b"right after mapping the user memory");
 
-        debug(b"the current process root table: ".as_slice());
+        debug(b"the current process root table: ");
         debug(u64_to_str_hex(process_root_table_pa.raw() as u64, &mut buf));
 
         enter_usermode(
             0x0000_0000_0001_0000,
-            (trap_entry.raw() + 0xffff_ffff_0000_0000) as usize,
+            trap_entry as *const () as usize,
             0x0000_0000_3fff_0fa0,
             (kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE + 0xfa0) as usize,
             process_root_table_pa.raw() as usize,
@@ -259,9 +231,7 @@ impl Kernel {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kmain() -> ! {
-    b"hello world from kernel\n"
-        .into_iter()
-        .for_each(|b| unsafe { core::ptr::write_volatile(UART_ADDR, *b) });
+    debug(b"hello world from kernel\n");
 
     enter_supervisor(start as *const () as usize);
 
@@ -317,13 +287,15 @@ pub fn enter_supervisor(entry: usize) {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> ! {
-    debug(b"hello from the supervisor\n".as_slice());
+    debug(b"hello from the supervisor\n");
 
     unsafe { KERNEL.initialize() };
 
-    debug(b"calling load\n".as_slice());
+    debug(b"calling load\n");
 
     unsafe { KERNEL.load_first_process() };
+
+    debug(b"damn executed the first user process\n");
 
     loop {
         core::hint::spin_loop();
@@ -386,7 +358,8 @@ pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kern
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn user_proc_1() -> ! {
+pub extern "C" fn user_proc_1() {
+    unsafe { asm!(".align 12") };
     let message = b"hello from the userspace\n";
     let message_ptr = message as *const u8;
     let message_len = message.len();
@@ -420,10 +393,6 @@ pub extern "C" fn user_proc_1() -> ! {
                 options(nostack),
             )
         }
-    }
-
-    loop {
-        core::hint::spin_loop();
     }
 }
 

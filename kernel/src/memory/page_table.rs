@@ -1,4 +1,5 @@
 use crate::{
+    KERNEL_DIRECT_MAPPING_BASE,
     allocator::Allocator,
     debug,
     memory::{page_table_entry::PageTableEntry, virtual_address::VirtualAddress},
@@ -8,10 +9,8 @@ use super::physical_address::PhysicalAddress;
 
 pub struct PageTable([PageTableEntry; 512]);
 
-pub const BASE: u64 = 0xffff_ffc0_0000_0000;
 pub const KERNEL_IMAGE_START: u64 = 0xffff_ffff_8000_0000;
 pub const KERNEL_PA_BASE: u64 = 0x8000_0000;
-const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffc0_0000_0000;
 
 pub enum Perm {
     Read,
@@ -28,8 +27,9 @@ impl PageTable {
     // TODO: make this dynamic
     /// Maps the ~254 GB of ram
     pub fn kvm_full_map(&mut self) {
+        let va = VirtualAddress::from_raw(KERNEL_DIRECT_MAPPING_BASE).unwrap();
         const GB: u64 = 1024 * 1024 * 1024;
-        self.0[256..510]
+        self.0[va.vpn_2()..510]
             .iter_mut()
             .enumerate()
             .for_each(|(i, pte)| {
@@ -123,13 +123,6 @@ impl PageTable {
         perm: Perm,
         is_user: bool,
     ) {
-        let mut buf = [0; 20];
-        debug(b"vpn_2: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_2() as u64, &mut buf));
-        debug(b"vpn_1: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_1() as u64, &mut buf));
-        debug(b"vpn_0: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_0() as u64, &mut buf));
         let l2_entry = &mut self.0[va.vpn_2()];
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
             let pa = allocator.alloc().unwrap();
