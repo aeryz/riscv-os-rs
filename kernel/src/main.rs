@@ -8,6 +8,8 @@ use core::{
     ptr,
 };
 
+use riscv::registers::{ControlRegister, satp::{self, Satp}};
+
 use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
@@ -34,7 +36,6 @@ const XSTATUS_SUM: usize = 0b1 << 18;
 const PMP_0_CFG: usize = 0b00001111;
 
 const SYSCALL_WRITE: usize = 1;
-const SATP_MODE_SV39: u64 = 8;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
@@ -58,15 +59,9 @@ pub struct Kernel {
 }
 
 pub fn debug<T: AsRef<[u8]>>(b: T) {
-    let satp: u64;
-    unsafe {
-        asm!(
-            "csrr {0}, satp",
-            out(reg) satp,
-        )
-    };
+    let satp = Satp::read();
 
-    let uart_addr = if satp == 0 {
+    let uart_addr = if satp.raw() == 0 {
         UART_PHYSICAL_ADDR
     } else {
         UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE
@@ -110,24 +105,25 @@ pub fn initialize_kernel() -> ! {
     debug(b"[kernel] kvm full mapped \n");
 
     debug(b"[kernel] right before enabling paging\n");
-    // root_pa must be 4KiB-aligned
-    let ppn = (root_page_table as *mut PageTable as u64) >> 12;
-    let satp = (SATP_MODE_SV39 << 60) | ppn;
 
     unsafe {
         KERNEL.allocator = allocator;
         KERNEL.root_page_table = root_page_table as *mut PageTable;
     }
 
+    Satp::empty()
+        .set_mode(satp::Mode::Sv39)
+        .set_ppn(root_page_table as *mut PageTable as u64)
+        .write();
+
+    riscv::clear_tlb();
+
     unsafe {
         asm!(
-        "csrw satp, {}",
-        "sfence.vma x0, x0",
         "li t0, {kernel_offset}",
         "add sp, sp, t0",
         "add t0, t0, {}",
         "jr t0",
-        in(reg) satp,
         in(reg) kinit_cont as *const () as u64,
         kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE), 
         options(noreturn, nostack, preserves_flags))
@@ -303,8 +299,8 @@ pub fn enter_usermode(
     kernel_stack: usize,
     user_satp: usize,
 ) {
-    let ppn = (user_satp as u64) >> 12;
-    let user_satp = (SATP_MODE_SV39 << 60) | ppn;
+
+    let user_satp = Satp::empty().set_mode(satp::Mode::Sv39).set_ppn(user_satp as u64);
 
     unsafe {
         asm!(
@@ -345,7 +341,7 @@ pub fn enter_usermode(
             entry = in(reg) entry,
             trap_handler = in(reg) trap_handler,
             sp = in(reg) user_stack,
-            user_satp = in(reg) user_satp,
+            user_satp = in(reg) user_satp.raw(),
             kernel_sp = in(reg) kernel_stack,
             xpp_m = const XSTATUS_MPP_X,
             sie = const XSTATUS_SIE,

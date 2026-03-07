@@ -1,5 +1,5 @@
 [workspace]
-members = ["kernel"]
+members = ["kernel", "riscv"]
 resolver = "3"
 
 [workspace.package]
@@ -7,3 +7,4 @@ license = "GPL"
 edition = "2024"
 
 [workspace.dependencies]
+riscv = { path = "./riscv", default-features = false }
