@@ -3,12 +3,14 @@
 #![allow(static_mut_refs)]
 
 use core::{
-    arch::{asm, global_asm}, cell::RefCell, panic::PanicInfo, ptr
+    arch::{asm, global_asm},
+    panic::PanicInfo,
+    ptr,
 };
 
-use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
+use crate::{helper::*, memory::virtual_address::VirtualAddress};
 
 pub mod allocator;
 pub mod helper;
@@ -34,7 +36,6 @@ const PMP_0_CFG: usize = 0b00001111;
 const SYSCALL_WRITE: usize = 1;
 const SATP_MODE_SV39: u64 = 8;
 
-const KERNEL_VMALLOC_BASE: u64 = 0xffff_ffc6_0000_0000;
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
 const KERNEL_PA_BASE: u64 = 0x8020_0000;
@@ -42,25 +43,18 @@ const KERNEL_PA_BASE: u64 = 0x8020_0000;
 unsafe extern "C" {
     static __text_start: u8;
     static __text_end: u8;
-    // static __rodata_start: u8;
-    // static __bss_start: u8;
     static __kernel_end: u8;
-    static __stack_bottom: u8;
-    static __stack_top: u8;
-    // static __kernel_stack_bottom: u8;
 }
 
 pub static mut KERNEL: Kernel = Kernel {
     allocator: Allocator::new(),
     root_page_table: ptr::null_mut(),
-    uart_addr: UART_PHYSICAL_ADDR,
 };
 
 #[repr(C)]
 pub struct Kernel {
     allocator: Allocator<4>,
     root_page_table: *mut PageTable,
-    uart_addr: u64,
 }
 
 pub fn debug<T: AsRef<[u8]>>(b: T) {
@@ -78,88 +72,87 @@ pub fn debug<T: AsRef<[u8]>>(b: T) {
         UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE
     };
 
-    b.as_ref().into_iter()
+    b.as_ref()
+        .into_iter()
         .for_each(|b| unsafe { core::ptr::write_volatile(uart_addr as *mut u8, *b) });
 }
 
+pub fn initialize_kernel() {
+    let memory_start =
+        unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
+    let mut allocator = Allocator::new();
+    allocator.set_start_addr(memory_start);
+
+    let root_page_table: &mut PageTable = unsafe { &mut *allocator.alloc().unwrap().as_ptr_mut() };
+
+    *root_page_table = PageTable::empty();
+    root_page_table.kvm_full_map();
+
+    let text_end = unsafe { &__text_end as *const u8 as u64 };
+    let mut text_start =
+        unsafe { PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64) };
+
+    let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
+
+    debug(b"[kernel] the text page count is: ");
+    let mut buf = [0; 20];
+    debug(u64_to_str(n_text_pages, &mut buf));
+
+    for _ in 0..n_text_pages {
+        root_page_table.create_identity_mapped_page(
+            text_start,
+            &mut allocator,
+            page_table::Perm::Execute,
+        );
+        text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
+    }
+    debug(b"[kernel] kvm full mapped \n");
+
+    debug(b"[kernel] right before enabling paging\n");
+    // root_pa must be 4KiB-aligned
+    let ppn = (root_page_table as *mut PageTable as u64) >> 12;
+    let satp = (SATP_MODE_SV39 << 60) | ppn;
+
+    unsafe {
+        asm!(
+        "csrw satp, {}",
+        "auipc t1, 0",
+        "li t0, {kernel_offset}",
+        "add t0, t0, t1",
+        "jr  t0",
+        // flush the tlb
+        "sfence.vma x0, x0",
+        "li t0, {kernel_offset}",
+        "addi t0, t0, -0xe",
+        "add sp, sp, t0",
+        "add ra, ra, t0",
+        in(reg) satp,
+        // TODO: adding 0xc here is a nasty hack because above, we load the pc, then we execute a few instructions
+        // and only then we jump. 0xe moves the pointer to `sfence.vma`. But manually computing it like this is nasty
+        // and error prone. We should change it.
+        kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE + 0xe), 
+        lateout("t0") _,
+        lateout("t1") _,
+        options(nostack, preserves_flags))
+    }
+    debug(b"[kernel] right after enabling paging\n");
+
+    unsafe {
+        KERNEL.allocator = allocator;
+        KERNEL.root_page_table = root_page_table as *mut PageTable;
+    };
+}
+
 impl Kernel {
-
-    pub fn initialize(&mut self) {
-        let memory_start =
-            unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
-        self.allocator.set_start_addr(memory_start);
-
-        self.initialize_page_tables();
-    }
-
-    pub fn initialize_page_tables(&mut self) {
-        let root_page_table: &mut PageTable = unsafe { &mut *self.allocator.alloc().unwrap().as_ptr_mut() };
-
-        *root_page_table = PageTable::empty();
-        root_page_table.kvm_full_map();
-
-        let text_end = unsafe {&__text_end as *const u8 as u64 };
-        let mut text_start = unsafe {
-            PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64) };
-
-        let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
-
-        debug(b"[kernel] the text page count is: ");
-        let mut buf = [0; 20];
-        debug(u64_to_str(n_text_pages, &mut buf));
-
-        for _ in 0..n_text_pages {
-            root_page_table.create_identity_mapped_page(
-                text_start,
-                &mut self.allocator,
-                page_table::Perm::Execute,
-            );
-            text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
-        }
-        debug(b"[kernel] kvm full mapped \n");
-
-        self.root_page_table = root_page_table;
-
-        debug(b"[kernel] right before enabling paging\n");
-        self.initiate_paging();
-        debug(b"[kernel] right after enabling paging\n");
-    }
-
-    #[inline(never)]
-    pub fn initiate_paging(&mut self) {
-        // root_pa must be 4KiB-aligned
-        let ppn = (self.root_page_table as u64) >> 12;
-        let satp = (SATP_MODE_SV39 << 60) | ppn;
-
-        unsafe {
-            asm!(
-            "csrw satp, {}",
-            "auipc t1, 0",
-            "li t0, {kernel_offset}",
-            "add t0, t0, t1",
-            "jr  t0",
-            // flush the tlb
-            "sfence.vma x0, x0",
-            "li t0, {kernel_offset}",
-            "addi t0, t0, -0xe",
-            "add sp, sp, t0",
-            "add ra, ra, t0",
-            in(reg) satp,
-            // TODO: adding 0xc here is a nasty hack because above, we load the pc, then we execute a few instructions
-            // and only then we jump. 0xe moves the pointer to `sfence.vma`. But manually computing it like this is nasty
-            // and error prone. We should change it.
-            kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE + 0xe), 
-            options(nostack, preserves_flags))
-        }
-    }
-
     #[inline(never)]
     pub fn load_first_process(&mut self) {
         let mut buf = [0; 20];
         debug(b"loading the first user process\n");
         // we first initiate user's root page table
         let process_root_table_pa = self.allocator.alloc().unwrap();
-        let process_root_table_va = VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+        let process_root_table_va =
+            VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE)
+                .unwrap();
         let process_root_table = process_root_table_va.as_ptr_mut();
         unsafe { *process_root_table = PageTable::empty() };
 
@@ -168,7 +161,9 @@ impl Kernel {
         unsafe {
             (*process_root_table).map_user_memory(
                 VirtualAddress::from_raw(0x0000_0000_0001_0000).unwrap(),
-                PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000),
+                PhysicalAddress::from_raw_unchecked(
+                    user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000,
+                ),
                 &mut self.allocator,
                 page_table::Perm::Execute,
                 true,
@@ -178,7 +173,9 @@ impl Kernel {
         unsafe {
             (*process_root_table).map_user_memory(
                 VirtualAddress::from_raw(0x0000_0000_0001_1000).unwrap(),
-                PhysicalAddress::from_raw_unchecked(user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000 + 0x1000),
+                PhysicalAddress::from_raw_unchecked(
+                    user_proc_1 as *const () as u64 - 0xffff_ffff_0000_0000 + 0x1000,
+                ),
                 &mut self.allocator,
                 page_table::Perm::Read,
                 true,
@@ -197,7 +194,7 @@ impl Kernel {
             )
         };
 
-        let kernel_stack = self.allocator.alloc().unwrap(); 
+        let kernel_stack = self.allocator.alloc().unwrap();
 
         unsafe {
             (*process_root_table).map_user_memory(
@@ -226,7 +223,6 @@ impl Kernel {
             process_root_table_pa.raw() as usize,
         );
     }
-
 }
 
 #[unsafe(no_mangle)]
@@ -289,9 +285,12 @@ pub fn enter_supervisor(entry: usize) {
 pub extern "C" fn start() -> ! {
     debug(b"hello from the supervisor\n");
 
-    unsafe { KERNEL.initialize() };
+    initialize_kernel();
 
-    debug(b"calling load\n");
+    let kernel_addr = unsafe { &KERNEL as *const Kernel as u64 };
+    let mut buf = [0; 20];
+    debug(b"kernel is loaded at after paging: ");
+    debug(u64_to_str_hex(kernel_addr, &mut buf));
 
     unsafe { KERNEL.load_first_process() };
 
@@ -303,7 +302,13 @@ pub extern "C" fn start() -> ! {
 }
 
 #[inline(never)]
-pub fn enter_usermode(entry: usize, trap_handler: usize, user_stack: usize, kernel_stack: usize, user_satp: usize) {
+pub fn enter_usermode(
+    entry: usize,
+    trap_handler: usize,
+    user_stack: usize,
+    kernel_stack: usize,
+    user_satp: usize,
+) {
     let ppn = (user_satp as u64) >> 12;
     let user_satp = (SATP_MODE_SV39 << 60) | ppn;
 

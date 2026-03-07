@@ -24,7 +24,7 @@ SECTIONS
     *(.data .data.*)
   }
 
-  .bss (NOLOAD) : {
+  .bss : AT(ADDR(.bss) - LOAD_OFFSET) {
     *(.bss .bss.*)
     *(COMMON)
   }
