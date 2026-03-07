@@ -77,7 +77,8 @@ pub fn debug<T: AsRef<[u8]>>(b: T) {
         .for_each(|b| unsafe { core::ptr::write_volatile(uart_addr as *mut u8, *b) });
 }
 
-pub fn initialize_kernel() {
+#[inline(never)]
+pub fn initialize_kernel() -> ! {
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
     let mut allocator = Allocator::new();
@@ -114,33 +115,23 @@ pub fn initialize_kernel() {
     let satp = (SATP_MODE_SV39 << 60) | ppn;
 
     unsafe {
-        asm!(
-        "csrw satp, {}",
-        "auipc t1, 0",
-        "li t0, {kernel_offset}",
-        "add t0, t0, t1",
-        "jr  t0",
-        // flush the tlb
-        "sfence.vma x0, x0",
-        "li t0, {kernel_offset}",
-        "addi t0, t0, -0xe",
-        "add sp, sp, t0",
-        "add ra, ra, t0",
-        in(reg) satp,
-        // TODO: adding 0xc here is a nasty hack because above, we load the pc, then we execute a few instructions
-        // and only then we jump. 0xe moves the pointer to `sfence.vma`. But manually computing it like this is nasty
-        // and error prone. We should change it.
-        kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE + 0xe), 
-        lateout("t0") _,
-        lateout("t1") _,
-        options(nostack, preserves_flags))
-    }
-    debug(b"[kernel] right after enabling paging\n");
-
-    unsafe {
         KERNEL.allocator = allocator;
         KERNEL.root_page_table = root_page_table as *mut PageTable;
-    };
+    }
+
+    unsafe {
+        asm!(
+        "csrw satp, {}",
+        "sfence.vma x0, x0",
+        "li t0, {kernel_offset}",
+        "add sp, sp, t0",
+        "add t0, t0, {}",
+        "jr t0",
+        in(reg) satp,
+        in(reg) kinit_cont as *const () as u64,
+        kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE), 
+        options(noreturn, nostack, preserves_flags))
+    }
 }
 
 impl Kernel {
@@ -286,7 +277,10 @@ pub extern "C" fn start() -> ! {
     debug(b"hello from the supervisor\n");
 
     initialize_kernel();
+}
 
+#[unsafe(no_mangle)]
+pub extern "C" fn kinit_cont() -> ! {
     let kernel_addr = unsafe { &KERNEL as *const Kernel as u64 };
     let mut buf = [0; 20];
     debug(b"kernel is loaded at after paging: ");
