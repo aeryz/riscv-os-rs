@@ -8,7 +8,7 @@ use core::{
     ptr,
 };
 
-use riscv::registers::{ControlRegister, satp::{self, Satp}};
+use riscv::registers::{Satp, SatpMode, SstatusSpp};
 
 use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
@@ -30,9 +30,6 @@ const UART_PHYSICAL_ADDR: u64 = 0x10000000;
 
 const XSTATUS_XPP_SHIFT: usize = 11;
 const XSTATUS_XPP_S: usize = 0b01 << XSTATUS_XPP_SHIFT;
-const XSTATUS_MPP_X: usize = 0b11 << XSTATUS_XPP_SHIFT;
-const XSTATUS_SIE: usize = 0b1 << 1;
-const XSTATUS_SUM: usize = 0b1 << 18;
 const PMP_0_CFG: usize = 0b00001111;
 
 const SYSCALL_WRITE: usize = 1;
@@ -111,12 +108,9 @@ pub fn initialize_kernel() -> ! {
         KERNEL.root_page_table = root_page_table as *mut PageTable;
     }
 
-    Satp::empty()
-        .set_mode(satp::Mode::Sv39)
-        .set_ppn(root_page_table as *mut PageTable as u64)
-        .write();
-
-    riscv::clear_tlb();
+    riscv::write_satp(Satp::empty()
+        .set_mode(SatpMode::Sv39)
+        .set_ppn(root_page_table as *mut PageTable as u64));
 
     unsafe {
         asm!(
@@ -132,7 +126,7 @@ pub fn initialize_kernel() -> ! {
 
 impl Kernel {
     #[inline(never)]
-    pub fn load_first_process(&mut self) {
+    pub fn load_first_process(&mut self) -> ! {
         let mut buf = [0; 20];
         debug(b"loading the first user process\n");
         // we first initiate user's root page table
@@ -197,7 +191,7 @@ impl Kernel {
             (*process_root_table).kvm_full_map();
         }
 
-        debug(b"right after mapping the user memory");
+        debug(b"right after mapping the user memory\n");
 
         debug(b"the current process root table: ");
         debug(u64_to_str_hex(process_root_table_pa.raw() as u64, &mut buf));
@@ -217,10 +211,6 @@ pub extern "C" fn kmain() -> ! {
     debug(b"hello world from kernel\n");
 
     enter_supervisor(start as *const () as usize);
-
-    loop {
-        core::hint::spin_loop();
-    }
 }
 
 #[inline(always)]
@@ -231,41 +221,52 @@ pub fn mret() {
 }
 
 #[inline(always)]
-pub fn enter_supervisor(entry: usize) {
-    unsafe {
-        asm!(
-            "csrw mepc, {entry}",
+pub fn enter_supervisor(entry: usize) -> ! {
 
-            "csrr t0, mstatus",
-            "li t1, {xpp_s}",
-            // unset 12th bit for setting the MPP to 01(S mode)
-            "or t0, t0, t1",
-            "slli t1, t1, 1",
-            "not t1, t1",
-            "and t0, t0, t1",
-            "csrw mstatus, t0",
+    riscv::registers::Mepc::new(entry as u64).write();
+    riscv::registers::Mstatus::read().enable_supervisor_mode().write();
+    riscv::registers::Mideleg::empty().delegate_all().write();
+    riscv::registers::Medeleg::empty().delegate_all().write();
 
-            // TODO: delegating everything to supervisor right now for ease of use.
-            // Need to investigate further to see if we want to handle some traps
-            // in the M-level.
-            // Delegate all interrupts and traps to the supervisor
-            "li t0, -1",
-            "csrw medeleg, t0",
-            "csrw mideleg, t0",
+    riscv::registers::Pmpaddr0::new(0x2fffffffffffffff).write();
+    riscv::registers::Pmpcfg0::empty().enable_tor().set_readable().set_writable().set_executable().write();
 
-            // Allow the supervisor to read/write/execute anywhere between 0-0x2fffff..
-            "li t0, 0x2fffffffffffffff",
-            "csrw pmpaddr0, t0",
-            "csrw pmpcfg0, {pmp_cfg}",
+    riscv::mret();
 
-            "mret",
+    // unsafe {
+    //     asm!(
+    //         "csrw mepc, {entry}",
 
-            entry = in(reg) entry,
-            xpp_s = const XSTATUS_XPP_S,
-            pmp_cfg = const PMP_0_CFG,
-            options(noreturn)
-        )
-    }
+    //         "csrr t0, mstatus",
+    //         "li t1, {xpp_s}",
+    //         // unset 12th bit for setting the MPP to 01(S mode)
+    //         "or t0, t0, t1",
+    //         "slli t1, t1, 1",
+    //         "not t1, t1",
+    //         "and t0, t0, t1",
+    //         "csrw mstatus, t0",
+
+    //         // TODO: delegating everything to supervisor right now for ease of use.
+    //         // Need to investigate further to see if we want to handle some traps
+    //         // in the M-level.
+    //         // Delegate all interrupts and traps to the supervisor
+    //         "li t0, -1",
+    //         "csrw medeleg, t0",
+    //         "csrw mideleg, t0",
+
+    //         // Allow the supervisor to read/write/execute anywhere between 0-0x2fffff..
+    //         "li t0, 0x2fffffffffffffff",
+    //         "csrw pmpaddr0, t0",
+    //         "csrw pmpcfg0, {pmp_cfg}",
+
+    //         "mret",
+
+    //         entry = in(reg) entry,
+    //         xpp_s = const XSTATUS_XPP_S,
+    //         pmp_cfg = const PMP_0_CFG,
+    //         options(noreturn)
+    //     )
+    // }
 }
 
 #[unsafe(no_mangle)]
@@ -283,12 +284,6 @@ pub extern "C" fn kinit_cont() -> ! {
     debug(u64_to_str_hex(kernel_addr, &mut buf));
 
     unsafe { KERNEL.load_first_process() };
-
-    debug(b"damn executed the first user process\n");
-
-    loop {
-        core::hint::spin_loop();
-    }
 }
 
 #[inline(never)]
@@ -297,59 +292,33 @@ pub fn enter_usermode(
     trap_handler: usize,
     user_stack: usize,
     kernel_stack: usize,
-    user_satp: usize,
-) {
+    user_root_table_pa: usize,
+) -> ! {
+    let kernel_satp = Satp::read();
 
-    let user_satp = Satp::empty().set_mode(satp::Mode::Sv39).set_ppn(user_satp as u64);
+    riscv::write_satp(
+        Satp::empty()
+            .set_mode(SatpMode::Sv39)
+            .set_ppn(user_root_table_pa as u64),
+    );
+
+    riscv::registers::Sepc::new(entry as u64).write();
+
+    riscv::registers::Sstatus::read()
+        .enable_user_mode()
+        .disable_supervisor_interrupts()
+        .enable_user_page_access()
+        .write();
+
+    riscv::registers::Stvec::new(trap_handler as u64).write();
 
     unsafe {
-        asm!(
-            // save the kernel satp for later
-            "csrr t2, satp",
-            // first switch to the user satp
-            "csrw satp, {user_satp}",
-            "sfence.vma x0, x0",
-
-            "csrw sepc, {entry}",
-
-            "csrr t0, sstatus",
-            // set spp to usermode (00)
-            "li t1, {xpp_m}",
-            "not t1, t1",
-            "and t0, t0, t1",
-
-            // enable trap handler
-            "ori t0, t0, {sie}",
-            // s-mode can access user accessible pages
-            "or t0, t0, {sum}",
-
-            "csrw sstatus, t0",
-
-            // setup the trap handler base address
-            "csrw stvec, {trap_handler}",
-
-            // setup kernel stack
-            "mv t0, {kernel_sp}",
-            "sd t2, 0(t0)",
-            "csrw sscratch, t0",
-
-            // TODO: enable scounteren
-
-            "mv sp, {sp}",
-            "sret",
-
-            entry = in(reg) entry,
-            trap_handler = in(reg) trap_handler,
-            sp = in(reg) user_stack,
-            user_satp = in(reg) user_satp.raw(),
-            kernel_sp = in(reg) kernel_stack,
-            xpp_m = const XSTATUS_MPP_X,
-            sie = const XSTATUS_SIE,
-            sum = in(reg) XSTATUS_SUM,
-
-            options(noreturn)
-        )
+        *(kernel_stack as *mut u64) = kernel_satp.raw();
     }
+
+    riscv::registers::Sscratch::new(kernel_stack as u64).write();
+
+    riscv::sret(user_stack as u64);
 }
 
 #[unsafe(no_mangle)]

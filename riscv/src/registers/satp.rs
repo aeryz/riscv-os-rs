@@ -21,12 +21,7 @@ impl Satp {
     pub const PPN_MASK: u64 = (1 << 44) - 1;
 
     #[must_use]
-    pub const fn empty() -> Self {
-        Self(0)
-    }
-
-    #[must_use]
-    pub const fn set_mode(mut self, mode: Mode) -> Self {
+    pub const fn set_mode(mut self, mode: SatpMode) -> Self {
         self.0 = (self.0 & (!Self::MODE_MASK)) | ((mode as u64) << Self::MODE_SHIFT);
         self
     }
@@ -36,15 +31,10 @@ impl Satp {
         self.0 = (self.0 & (!Self::PPN_MASK)) | ((ppn >> 12) & Self::PPN_MASK);
         self
     }
-
-    #[must_use]
-    pub const fn raw(&self) -> u64 {
-        self.0
-    }
 }
 
 #[repr(u64)]
-pub enum Mode {
+pub enum SatpMode {
     Bare = 0,
     Sv39 = 8,
     Sv48 = 9,
