@@ -222,7 +222,6 @@ pub fn mret() {
 
 #[inline(always)]
 pub fn enter_supervisor(entry: usize) -> ! {
-
     riscv::registers::Mepc::new(entry as u64).write();
     riscv::registers::Mstatus::read().enable_supervisor_mode().write();
     riscv::registers::Mideleg::empty().delegate_all().write();
@@ -232,41 +231,6 @@ pub fn enter_supervisor(entry: usize) -> ! {
     riscv::registers::Pmpcfg0::empty().enable_tor().set_readable().set_writable().set_executable().write();
 
     riscv::mret();
-
-    // unsafe {
-    //     asm!(
-    //         "csrw mepc, {entry}",
-
-    //         "csrr t0, mstatus",
-    //         "li t1, {xpp_s}",
-    //         // unset 12th bit for setting the MPP to 01(S mode)
-    //         "or t0, t0, t1",
-    //         "slli t1, t1, 1",
-    //         "not t1, t1",
-    //         "and t0, t0, t1",
-    //         "csrw mstatus, t0",
-
-    //         // TODO: delegating everything to supervisor right now for ease of use.
-    //         // Need to investigate further to see if we want to handle some traps
-    //         // in the M-level.
-    //         // Delegate all interrupts and traps to the supervisor
-    //         "li t0, -1",
-    //         "csrw medeleg, t0",
-    //         "csrw mideleg, t0",
-
-    //         // Allow the supervisor to read/write/execute anywhere between 0-0x2fffff..
-    //         "li t0, 0x2fffffffffffffff",
-    //         "csrw pmpaddr0, t0",
-    //         "csrw pmpcfg0, {pmp_cfg}",
-
-    //         "mret",
-
-    //         entry = in(reg) entry,
-    //         xpp_s = const XSTATUS_XPP_S,
-    //         pmp_cfg = const PMP_0_CFG,
-    //         options(noreturn)
-    //     )
-    // }
 }
 
 #[unsafe(no_mangle)]
