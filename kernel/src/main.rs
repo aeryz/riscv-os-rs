@@ -8,7 +8,7 @@ use core::{
     ptr,
 };
 
-use riscv::registers::{Satp, SatpMode, SstatusSpp};
+use riscv::registers::{Satp, SatpMode};
 
 use crate::memory::page_table::{self, PageTable};
 use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
@@ -27,10 +27,6 @@ unsafe extern "C" {
 }
 
 const UART_PHYSICAL_ADDR: u64 = 0x10000000;
-
-const XSTATUS_XPP_SHIFT: usize = 11;
-const XSTATUS_XPP_S: usize = 0b01 << XSTATUS_XPP_SHIFT;
-const PMP_0_CFG: usize = 0b00001111;
 
 const SYSCALL_WRITE: usize = 1;
 
@@ -108,9 +104,11 @@ pub fn initialize_kernel() -> ! {
         KERNEL.root_page_table = root_page_table as *mut PageTable;
     }
 
-    riscv::write_satp(Satp::empty()
-        .set_mode(SatpMode::Sv39)
-        .set_ppn(root_page_table as *mut PageTable as u64));
+    riscv::write_satp(
+        Satp::empty()
+            .set_mode(SatpMode::Sv39)
+            .set_ppn(root_page_table as *mut PageTable as u64),
+    );
 
     unsafe {
         asm!(
@@ -223,12 +221,19 @@ pub fn mret() {
 #[inline(always)]
 pub fn enter_supervisor(entry: usize) -> ! {
     riscv::registers::Mepc::new(entry as u64).write();
-    riscv::registers::Mstatus::read().enable_supervisor_mode().write();
+    riscv::registers::Mstatus::read()
+        .enable_supervisor_mode()
+        .write();
     riscv::registers::Mideleg::empty().delegate_all().write();
     riscv::registers::Medeleg::empty().delegate_all().write();
 
     riscv::registers::Pmpaddr0::new(0x2fffffffffffffff).write();
-    riscv::registers::Pmpcfg0::empty().enable_tor().set_readable().set_writable().set_executable().write();
+    riscv::registers::Pmpcfg0::empty()
+        .enable_tor()
+        .set_readable()
+        .set_writable()
+        .set_executable()
+        .write();
 
     riscv::mret();
 }
