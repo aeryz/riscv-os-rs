@@ -212,13 +212,6 @@ pub extern "C" fn kmain() -> ! {
 }
 
 #[inline(always)]
-pub fn mret() {
-    unsafe {
-        asm!("mret", options(nomem, nostack, preserves_flags));
-    }
-}
-
-#[inline(always)]
 pub fn enter_supervisor(entry: usize) -> ! {
     riscv::registers::Mepc::new(entry as u64).write();
     riscv::registers::Mstatus::read()
@@ -241,6 +234,13 @@ pub fn enter_supervisor(entry: usize) -> ! {
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> ! {
     debug(b"hello from the supervisor\n");
+
+    unsafe {
+        asm!(
+            "li t1, 32",
+            "csrs sie, t1" // Timer interrupt enable flag: STIE
+        )
+    }
 
     initialize_kernel();
 }

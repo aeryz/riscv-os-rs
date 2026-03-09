@@ -20,3 +20,4 @@ def_impl_control_register!(Stvec, stvec);
 def_impl_control_register!(Sscratch, sscratch);
 def_impl_control_register!(Mepc, mepc);
 def_impl_control_register!(Pmpaddr0, pmpaddr0);
+def_impl_control_register!(Mtvec, mtvec);
