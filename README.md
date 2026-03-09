@@ -20,9 +20,10 @@ I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to j
 - [X] Arrange the project and isolate the inline assembly into a reusable library.
 
 ### Phase 3 (handle userspace programs):
-- [ ] Create one userspace process.
+- [X] Create one userspace process.
+- [ ] Create a static process table and `schedule` after the trap handling.
+- [ ] Create N user processes.
 - [ ] Add timer interrupt and experiment with yielding the execution to the kernel.
-- [ ] Work with multiple processes with a basic round robin scheduler. (context switch).
 
 ### Phase 4 (non-stub page allocator):
 - [ ] Have a page allocator (haven't decided on the algorithm right now)
