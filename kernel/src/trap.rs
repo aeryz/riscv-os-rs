@@ -1,6 +1,9 @@
 use core::arch::global_asm;
 
-use crate::{SYSCALL_WRITE, UART_PHYSICAL_ADDR, debug};
+use crate::{
+    KERNEL, PROC_TABLE, SYSCALL_WRITE, debug,
+    helper::{u64_to_str, u64_to_str_hex},
+};
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
 // This is required because:
@@ -25,7 +28,12 @@ trap_entry:
     // Otherwise, there is no guarantee that our registers will not be
     // altered with. (had a painful experience with this)
     sd ra,  0*8(sp)
-    sd sp,  1*8(sp)
+
+    // read the user sp
+    csrr ra, sscratch
+    sd ra,  1*8(sp)
+    // then restore the ra
+    ld ra,  0*8(sp)
     sd gp,  2*8(sp)
     sd tp,  3*8(sp)
     sd t0,  4*8(sp)
@@ -56,8 +64,11 @@ trap_entry:
     sd t5,  29*8(sp)
     sd t6,  30*8(sp)
 
-    csrr t0, scause
+    csrr t0, sepc
     sd t0, 31*8(sp)
+
+    csrr t0, scause
+    sd t0, 32*8(sp)
 
     // TODO: we used to switch satp but now we map the whole kernel to userspace as well
     // ld t0, 32*8(sp)
@@ -68,8 +79,13 @@ trap_entry:
     mv a0, sp
     call trap_handler
 
+    mv sp, a0
+
+    ld t0, 31*8(sp)
+    addi t0, t0, 4
+    csrw sepc, t0
+
     ld ra,  0*8(sp)
-    ld sp,  1*8(sp)
     ld gp,  2*8(sp)
     ld tp,  3*8(sp)
     ld t0,  4*8(sp)
@@ -102,14 +118,14 @@ trap_entry:
 
     // Restore the stack pointer
     addi sp, sp, {TRAPFRAME_SIZE}
+    csrw sscratch, sp
 
     // Increment `sepc` to return to the next instr after `ecall`
-    csrr t0, sepc
-    // `ecall` is 4 bytes
-    addi t0, t0, 4 
-    csrw sepc, t0
-    // Swap the user and kernel stacks back
-    csrrw sp, sscratch, sp
+    // csrr t0, sepc
+    // // `ecall` is 4 bytes
+    // addi t0, t0, 4 
+    // csrw sepc, t0
+    ld sp, 1*8(sp)
     sret
 "#,
     TRAPFRAME_SIZE = const size_of::<TrapFrame>(),
@@ -117,7 +133,8 @@ trap_entry:
 
 // TODO: should we represent registers as signed instead?
 #[repr(C)]
-struct TrapFrame {
+#[derive(Clone, Default)]
+pub struct TrapFrame {
     ra: usize,
     sp: usize,
     gp: usize,
@@ -150,11 +167,21 @@ struct TrapFrame {
     t5: usize,
     t6: usize,
 
+    sepc: usize,
     scause: usize,
 }
 
+impl TrapFrame {
+    pub fn with_sepc(sepc: u64) -> Self {
+        Self {
+            sepc: sepc as usize,
+            ..Default::default()
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
-extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
+extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
     trap_frame.a0 = 0xffffffffffffffff; // -1
     match trap_frame.scause {
         // 8 = environment call from U-Mode
@@ -172,7 +199,67 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
                 trap_frame.a0 = count;
             }
+
+            schedule(trap_frame)
         }
-        _ => {}
+        _ => {
+            unreachable!()
+        }
+    }
+}
+
+// TODO: temporary function to schedule a new process
+fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
+    let mut buf = [0; 20];
+
+    let mut current_proc = unsafe { KERNEL.current_running_proc } as u64;
+
+    unsafe {
+        PROC_TABLE[current_proc as usize]
+            .assume_init_mut()
+            .trap_frame = trap_frame as *mut TrapFrame;
+    }
+
+    debug("current proc: ");
+    debug(u64_to_str(
+        unsafe { KERNEL.current_running_proc } as u64,
+        &mut buf,
+    ));
+
+    if current_proc + 1 >= unsafe { KERNEL.n_procs } as u64 {
+        current_proc = 0;
+        unsafe {
+            KERNEL.current_running_proc = 0;
+        }
+    } else {
+        current_proc += 1;
+        unsafe {
+            KERNEL.current_running_proc += 1;
+        }
+    }
+
+    let process = unsafe { PROC_TABLE[current_proc as usize].assume_init_ref() };
+
+    debug("switching to: ");
+    debug(u64_to_str(current_proc, &mut buf));
+
+    riscv::registers::Satp::empty()
+        .set_mode(riscv::registers::SatpMode::Sv39)
+        .set_ppn(process.root_table_pa)
+        .write();
+
+    if process.trap_frame.is_null() {
+        debug("trap frame is null, so setting it to: ");
+        let tf = (process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
+        debug(u64_to_str_hex(tf as u64, &mut buf));
+        unsafe {
+            // TODO: -4 is a temporary hack to make trap entry sepc + 4 work
+            (*tf).sepc = crate::process::PROC_TEXT_VA as usize - 4;
+            (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
+        }
+        tf
+    } else {
+        debug("trap frame is not null\n");
+        process.trap_frame
     }
 }

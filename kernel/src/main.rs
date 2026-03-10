@@ -3,9 +3,7 @@
 #![allow(static_mut_refs)]
 
 use core::{
-    arch::{asm, global_asm},
-    panic::PanicInfo,
-    ptr,
+    arch::{asm, global_asm}, mem::MaybeUninit, panic::PanicInfo, ptr
 };
 
 use riscv::registers::{Satp, SatpMode};
@@ -49,18 +47,17 @@ unsafe extern "C" {
 pub static mut KERNEL: Kernel = Kernel {
     allocator: Allocator::new(),
     root_page_table: ptr::null_mut(),
+    current_running_proc: 0,
     n_procs: 0,
 };
 
-pub static mut PROC_TABLE: [Process; 1] = [Process {
-    kernel_sp: 0,
-    root_table_pa: 0,
-}];
+pub static mut PROC_TABLE: [MaybeUninit<Process>; 2] = [const { MaybeUninit::uninit() }; 2];
 
 #[repr(C)]
 pub struct Kernel {
     allocator: Allocator<4>,
     root_page_table: *mut PageTable,
+    current_running_proc: usize,
     n_procs: usize,
 }
 
@@ -182,10 +179,12 @@ impl Kernel {
         };
 
         let kernel_stack = self.allocator.alloc().unwrap();
+        let kernel_stack_va =
+            VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
 
         unsafe {
             (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap(),
+                kernel_stack_va,
                 kernel_stack,
                 &mut self.allocator,
                 page_table::Perm::Write,
@@ -197,11 +196,26 @@ impl Kernel {
             (*process_root_table).kvm_full_map();
         }
 
+            let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
         unsafe {
-            PROC_TABLE[self.n_procs] = Process {
-                kernel_sp: kernel_stack.raw(),
+            PROC_TABLE[self.n_procs].write(Process {
+                pid: self.n_procs,
+                kernel_sp: kernel_sp_va.raw(),
                 root_table_pa: process_root_table_pa.raw(),
-            };
+                trap_frame: core::ptr::null_mut(),
+            });
+        }
+
+        unsafe {
+            let mut buf = [0; 20];
+            // We save `size_of::<Process>()` amount in the stack to write
+            let kernel_sp = kernel_sp_va.as_ptr_mut::<Process>().sub(1);
+            debug("current stack pointer is: ");
+            debug(u64_to_str_hex(kernel_sp_va.raw(), &mut buf));
+            debug("we save the process to: ");
+            debug(u64_to_str_hex(kernel_sp as u64, &mut buf));
+
+            *kernel_sp = PROC_TABLE[self.n_procs].assume_init_ref().clone();
         }
 
         self.n_procs += 1;
@@ -260,13 +274,17 @@ pub extern "C" fn kinit_cont() -> ! {
         KERNEL.create_process(user_proc_1 as *const () as u64);
     };
 
-    let process = unsafe { &PROC_TABLE[0] };
+    unsafe {        
+        KERNEL.create_process(user_proc_2 as *const () as u64);
+    };
+
+    let process = unsafe { PROC_TABLE[0].assume_init_ref() };
 
     enter_usermode(
         process::PROC_TEXT_VA,
         trap_entry as *const () as u64,
         process::PROC_STACK_VA,
-        process.kernel_sp + KERNEL_DIRECT_MAPPING_BASE + 0xfa0,
+        process.kernel_sp,
         process.root_table_pa,
     );
 }
@@ -309,28 +327,12 @@ pub fn enter_usermode(
 #[unsafe(no_mangle)]
 pub extern "C" fn user_proc_1() {
     unsafe { asm!(".align 12") };
-    let message = b"hello from the userspace\n";
-    let message_ptr = message as *const u8;
-    let message_len = message.len();
-
-    let ret: isize;
-
-    unsafe {
-        asm!(
-            "li a0, 1",
-            "ecall",
-            in("a7") SYSCALL_WRITE,
-            in("a1") message_ptr,
-            in("a2") message_len,
-            lateout("a0") ret,
-            options(nostack),
-        )
-    }
-
-    if ret != -1 {
-        let message = b"written to the kernel, cool\n";
+    loop {
+        let message = b"[1] this the userspace program\n";
         let message_ptr = message as *const u8;
         let message_len = message.len();
+
+        let ret: isize;
 
         unsafe {
             asm!(
@@ -339,12 +341,71 @@ pub extern "C" fn user_proc_1() {
                 in("a7") SYSCALL_WRITE,
                 in("a1") message_ptr,
                 in("a2") message_len,
+                lateout("a0") ret,
                 options(nostack),
             )
+        }
+
+        if ret != -1 {
+            let message = b"[1] written to the kernel, cool\n";
+            let message_ptr = message as *const u8;
+            let message_len = message.len();
+
+            unsafe {
+                asm!(
+                    "li a0, 1",
+                    "ecall",
+                    in("a7") SYSCALL_WRITE,
+                    in("a1") message_ptr,
+                    in("a2") message_len,
+                    options(nostack),
+                )
+            }
         }
     }
 }
 
+#[unsafe(no_mangle)]
+pub extern "C" fn user_proc_2() -> ! {
+    unsafe { asm!(".align 12") };
+
+    loop {
+        let message = b"[2] this the userspace program\n";
+        let message_ptr = message as *const u8;
+        let message_len = message.len();
+
+        let ret: isize;
+
+        unsafe {
+            asm!(
+                "li a0, 1",
+                "ecall",
+                in("a7") SYSCALL_WRITE,
+                in("a1") message_ptr,
+                in("a2") message_len,
+                lateout("a0") ret,
+                options(nostack),
+            )
+        }
+
+        if ret != -1 {
+            let message = b"[2] written to the kernel, cool\n";
+            let message_ptr = message as *const u8;
+            let message_len = message.len();
+
+            unsafe {
+                asm!(
+                    "li a0, 1",
+                    "ecall",
+                    in("a7") SYSCALL_WRITE,
+                    in("a1") message_ptr,
+                    in("a2") message_len,
+                    options(nostack),
+                )
+            }
+        }
+    }
+}
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {
