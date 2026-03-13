@@ -3,12 +3,15 @@
 #![allow(static_mut_refs)]
 
 use core::{
-    arch::{asm, global_asm}, mem::MaybeUninit, panic::PanicInfo, ptr
+    arch::{asm, global_asm},
+    mem::MaybeUninit,
+    panic::PanicInfo,
+    ptr,
 };
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{allocator::Allocator, memory::physical_address::PhysicalAddress};
+use crate::{allocator::Allocator, driver::uart::Uart, memory::physical_address::PhysicalAddress};
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::{
     memory::page_table::{self, PageTable},
@@ -18,6 +21,8 @@ use crate::{
 const QEMU_TEST: *mut u32 = 0x0010_0000 as *mut u32;
 
 pub mod allocator;
+pub mod console;
+pub mod driver;
 pub mod helper;
 pub mod memory;
 pub mod process;
@@ -37,6 +42,9 @@ const SYSCALL_WRITE: usize = 1;
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
 const KERNEL_PA_BASE: u64 = 0x8020_0000;
+
+pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
+pub static UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
 
 unsafe extern "C" {
     static __text_start: u8;
@@ -196,7 +204,7 @@ impl Kernel {
             (*process_root_table).kvm_full_map();
         }
 
-            let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+        let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
         unsafe {
             PROC_TABLE[self.n_procs].write(Process {
                 pid: self.n_procs,
@@ -274,9 +282,15 @@ pub extern "C" fn kinit_cont() -> ! {
         KERNEL.create_process(user_proc_1 as *const () as u64);
     };
 
-    unsafe {        
+    unsafe {
         KERNEL.create_process(user_proc_2 as *const () as u64);
     };
+
+    loop {
+        let mut buf = [0; 100];
+        let d = console::readline(&mut buf);
+        console::println(&buf[0..d]);
+    }
 
     let process = unsafe { PROC_TABLE[0].assume_init_ref() };
 
