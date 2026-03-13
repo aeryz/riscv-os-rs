@@ -4,6 +4,28 @@ This OS is mostly for learning purposes. It started as a challenge but one of my
 
 I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to just copy code and instead actually try to live through the pain of building everything from scratch.
 
+## Running
+
+Right now, I only have the docs for nix users:
+
+### Enter the devshell
+Use `direnv`:
+```
+direnv allow
+```
+
+Or just:
+```
+nix develop
+```
+
+### Run the OS
+```
+qemu-system-riscv64 \
+  -nographic \
+  -machine virt \
+  -bios target/riscv64gc-unknown-none-elf/release/kernel
+```
 
 ## Non-exhaustive list of the roadmap
 
