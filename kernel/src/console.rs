@@ -5,6 +5,10 @@ pub fn println<T: AsRef<[u8]>>(msg: T) {
     UART.put_char(b'\n');
 }
 
+pub fn getchar() -> u8 {
+    UART.get_char()
+}
+
 pub fn readline(buf: &mut [u8]) -> usize {
     let mut pos = 0;
     loop {

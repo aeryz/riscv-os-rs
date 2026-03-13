@@ -1,0 +1,37 @@
+use core::arch::asm;
+
+use crate::{SYSCALL_READ, SYSCALL_WRITE};
+
+pub fn write(data_ptr: *const u8, len: usize) -> isize {
+    let ret: isize;
+    unsafe {
+        asm!(
+            "li a0, 1",
+            "ecall",
+            in("a7") SYSCALL_WRITE,
+            in("a1") data_ptr,
+            in("a2") len,
+            lateout("a0") ret,
+            options(nostack),
+        )
+    }
+
+    ret
+}
+
+pub fn read(buf: *mut u8, count: usize) -> isize {
+    let ret: isize;
+    unsafe {
+        asm!(
+            "li a0, 1",
+            "ecall",
+            in("a7") SYSCALL_READ,
+            in("a1") buf,
+            in("a2") count,
+            lateout("a0") ret,
+            options(nostack),
+        )
+    }
+
+    ret
+}

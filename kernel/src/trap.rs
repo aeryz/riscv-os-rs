@@ -1,7 +1,9 @@
 use core::arch::global_asm;
 
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_WRITE, debug,
+    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE,
+    console::{self, println},
+    debug,
     helper::{u64_to_str, u64_to_str_hex},
 };
 
@@ -188,16 +190,36 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
         // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
         8 => {
             let syscall_number = trap_frame.a7;
-            if syscall_number == SYSCALL_WRITE {
-                let _fd = trap_frame.a0;
-                let buf = trap_frame.a1 as *const u8;
-                let count = trap_frame.a2;
+            match syscall_number {
+                SYSCALL_WRITE => {
+                    let _fd = trap_frame.a0;
+                    let buf = trap_frame.a1 as *const u8;
+                    let count = trap_frame.a2;
 
-                let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
+                    let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
 
-                debug(utf8_str);
+                    println(utf8_str);
 
-                trap_frame.a0 = count;
+                    trap_frame.a0 = count;
+                }
+                SYSCALL_READ => {
+                    let _fd = trap_frame.a0;
+                    let buf = trap_frame.a1 as *const u8;
+                    let count = trap_frame.a2;
+
+                    let mut pos = 0;
+
+                    for i in pos..count {
+                        let c = console::getchar();
+                        if c == '\n' {
+                            break;
+                        }
+                        pos += 
+                        
+                    }
+                    console::getchar()
+                }
+                _ => unreachable!(),
             }
 
             schedule(trap_frame)

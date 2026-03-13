@@ -27,6 +27,7 @@ pub mod helper;
 pub mod memory;
 pub mod process;
 pub mod trap;
+pub(crate) mod userspace;
 
 global_asm!(include_str!("start.s"));
 
@@ -38,6 +39,7 @@ unsafe extern "C" {
 const UART_PHYSICAL_ADDR: u64 = 0x10000000;
 
 const SYSCALL_WRITE: usize = 1;
+const SYSCALL_READ: usize = 2;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
