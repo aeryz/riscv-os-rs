@@ -51,10 +51,10 @@ qemu-system-riscv64 \
 ### Phase 4 (non-stub page allocator):
 - [ ] Have a page allocator (haven't decided on the algorithm right now)
 
-### Phase 4 (filesystem):
+### Phase 5 (filesystem):
 TBD
 
-### Phase 5 (more functionality from the POSIX):
+### Phase 6 (more functionality from the POSIX):
 TBD
 
 ## Resources
