@@ -63,6 +63,19 @@ pub static mut KERNEL: Kernel = Kernel {
 
 pub static mut PROC_TABLE: [MaybeUninit<Process>; 2] = [const { MaybeUninit::uninit() }; 2];
 
+pub const DEBUG_LEVEL: DebugLevel = {
+    if let Some(debug_level) = option_env!("DEBUG_LEVEL") {
+        match debug_level.as_bytes()[0] {
+            b'0' => DebugLevel::Trace,
+            b'1' => DebugLevel::Debug,
+            b'2' => DebugLevel::Info,
+            _ => DebugLevel::None,
+        }
+    } else {
+        DebugLevel::None
+    }
+};
+
 #[repr(C)]
 pub struct Kernel {
     allocator: Allocator<4>,
@@ -71,7 +84,39 @@ pub struct Kernel {
     n_procs: usize,
 }
 
-pub fn debug<T: AsRef<[u8]>>(b: T) {
+#[derive(PartialEq, PartialOrd)]
+pub enum DebugLevel {
+    Trace,
+    Debug,
+    Info,
+    None,
+}
+
+pub fn ktrace<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Trace {
+        return;
+    }
+    kprint("[KTRACE] ");
+    kprint(b)
+}
+
+pub fn kdebug<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Debug {
+        return;
+    }
+    kprint("[KDEBUG] ");
+    kprint(b)
+}
+
+pub fn kinfo<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Info {
+        return;
+    }
+    kprint("[KINFO] ");
+    kprint(b)
+}
+
+pub fn kprint<T: AsRef<[u8]>>(b: T) {
     let satp = Satp::read();
 
     let uart_addr = if satp.raw() == 0 {
@@ -103,9 +148,9 @@ pub fn initialize_kernel() -> ! {
 
     let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
 
-    debug(b"[kernel] the text page count is: ");
+    kdebug(b"the text page count is: ");
     let mut buf = [0; 20];
-    debug(u64_to_str(n_text_pages, &mut buf));
+    kdebug(u64_to_str(n_text_pages, &mut buf));
 
     for _ in 0..n_text_pages {
         root_page_table.create_identity_mapped_page(
@@ -115,9 +160,7 @@ pub fn initialize_kernel() -> ! {
         );
         text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
     }
-    debug(b"[kernel] kvm full mapped \n");
-
-    debug(b"[kernel] right before enabling paging\n");
+    kdebug(b"kvm full mapped \n");
 
     unsafe {
         KERNEL.allocator = allocator;
@@ -145,7 +188,7 @@ pub fn initialize_kernel() -> ! {
 impl Kernel {
     #[inline(never)]
     pub fn create_process(&mut self, entry: u64) {
-        debug(b"loading the first user process\n");
+        kinfo(b"loading the first user process\n");
         // we first initiate user's root page table
         let process_root_table_pa = self.allocator.alloc().unwrap();
         let process_root_table_va =
@@ -165,13 +208,21 @@ impl Kernel {
                 true,
             )
         };
-        // TODO: this mapping is also needed since the `entry` might refer to addresses between 0x11000-0x12000
         unsafe {
             (*process_root_table).map_user_memory(
                 VirtualAddress::from_raw(0x0000_0000_0001_1000).unwrap(),
                 PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000),
                 &mut self.allocator,
-                page_table::Perm::Read,
+                page_table::Perm::Execute,
+                true,
+            )
+        };
+        unsafe {
+            (*process_root_table).map_user_memory(
+                VirtualAddress::from_raw(0x0000_0000_0001_2000).unwrap(),
+                PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x2000),
+                &mut self.allocator,
+                page_table::Perm::Execute,
                 true,
             )
         };
@@ -217,13 +268,8 @@ impl Kernel {
         }
 
         unsafe {
-            let mut buf = [0; 20];
             // We save `size_of::<Process>()` amount in the stack to write
             let kernel_sp = kernel_sp_va.as_ptr_mut::<Process>().sub(1);
-            debug("current stack pointer is: ");
-            debug(u64_to_str_hex(kernel_sp_va.raw(), &mut buf));
-            debug("we save the process to: ");
-            debug(u64_to_str_hex(kernel_sp as u64, &mut buf));
 
             *kernel_sp = PROC_TABLE[self.n_procs].assume_init_ref().clone();
         }
@@ -234,7 +280,7 @@ impl Kernel {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn kmain() -> ! {
-    debug(b"hello world from kernel\n");
+    kdebug(b"hello world from kernel\n");
 
     enter_supervisor(start as *const () as usize);
 }
@@ -261,7 +307,7 @@ pub fn enter_supervisor(entry: usize) -> ! {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> ! {
-    debug(b"hello from the supervisor\n");
+    kdebug(b"hello from the supervisor\n");
 
     unsafe {
         asm!(
@@ -277,22 +323,12 @@ pub extern "C" fn start() -> ! {
 pub extern "C" fn kinit_cont() -> ! {
     let kernel_addr = unsafe { &KERNEL as *const Kernel as u64 };
     let mut buf = [0; 20];
-    debug(b"kernel is loaded at after paging: ");
-    debug(u64_to_str_hex(kernel_addr, &mut buf));
+    kdebug(b"kernel is loaded at after paging: ");
+    kdebug(u64_to_str_hex(kernel_addr, &mut buf));
 
     unsafe {
-        KERNEL.create_process(user_proc_1 as *const () as u64);
+        KERNEL.create_process(userspace::shell::shell as *const () as u64);
     };
-
-    unsafe {
-        KERNEL.create_process(user_proc_2 as *const () as u64);
-    };
-
-    loop {
-        let mut buf = [0; 100];
-        let d = console::readline(&mut buf);
-        console::println(&buf[0..d]);
-    }
 
     let process = unsafe { PROC_TABLE[0].assume_init_ref() };
 

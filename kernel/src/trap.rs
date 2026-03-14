@@ -1,10 +1,9 @@
 use core::arch::global_asm;
 
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE,
-    console::{self, println},
-    debug,
+    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
     helper::{u64_to_str, u64_to_str_hex},
+    kdebug,
 };
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
@@ -122,15 +121,11 @@ trap_entry:
     addi sp, sp, {TRAPFRAME_SIZE}
     csrw sscratch, sp
 
-    // Increment `sepc` to return to the next instr after `ecall`
-    // csrr t0, sepc
-    // // `ecall` is 4 bytes
-    // addi t0, t0, 4 
-    // csrw sepc, t0
-    ld sp, 1*8(sp)
+    ld sp, -{READ_SP}(sp)
     sret
 "#,
     TRAPFRAME_SIZE = const size_of::<TrapFrame>(),
+    READ_SP = const (size_of::<TrapFrame>() - 8),
 );
 
 // TODO: should we represent registers as signed instead?
@@ -198,26 +193,19 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
 
                     let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
 
-                    println(utf8_str);
+                    console::print(utf8_str);
 
                     trap_frame.a0 = count;
                 }
                 SYSCALL_READ => {
                     let _fd = trap_frame.a0;
-                    let buf = trap_frame.a1 as *const u8;
+                    let buf = trap_frame.a1 as *mut u8;
                     let count = trap_frame.a2;
 
-                    let mut pos = 0;
+                    let buf = unsafe { core::slice::from_raw_parts_mut(buf, count) };
 
-                    for i in pos..count {
-                        let c = console::getchar();
-                        if c == '\n' {
-                            break;
-                        }
-                        pos += 
-                        
-                    }
-                    console::getchar()
+                    let n_read = console::readline(buf);
+                    trap_frame.a0 = n_read;
                 }
                 _ => unreachable!(),
             }
@@ -242,8 +230,8 @@ fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
             .trap_frame = trap_frame as *mut TrapFrame;
     }
 
-    debug("current proc: ");
-    debug(u64_to_str(
+    kdebug("current proc: ");
+    kdebug(u64_to_str(
         unsafe { KERNEL.current_running_proc } as u64,
         &mut buf,
     ));
@@ -262,8 +250,8 @@ fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
 
     let process = unsafe { PROC_TABLE[current_proc as usize].assume_init_ref() };
 
-    debug("switching to: ");
-    debug(u64_to_str(current_proc, &mut buf));
+    kdebug("switching to: ");
+    kdebug(u64_to_str(current_proc, &mut buf));
 
     riscv::registers::Satp::empty()
         .set_mode(riscv::registers::SatpMode::Sv39)
@@ -271,9 +259,9 @@ fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
         .write();
 
     if process.trap_frame.is_null() {
-        debug("trap frame is null, so setting it to: ");
+        kdebug("trap frame is null, so setting it to: ");
         let tf = (process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
-        debug(u64_to_str_hex(tf as u64, &mut buf));
+        kdebug(u64_to_str_hex(tf as u64, &mut buf));
         unsafe {
             // TODO: -4 is a temporary hack to make trap entry sepc + 4 work
             (*tf).sepc = crate::process::PROC_TEXT_VA as usize - 4;
@@ -281,7 +269,7 @@ fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
         }
         tf
     } else {
-        debug("trap frame is not null\n");
+        kdebug("trap frame is not null\n");
         process.trap_frame
     }
 }

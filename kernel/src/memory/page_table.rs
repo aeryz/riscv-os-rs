@@ -1,7 +1,7 @@
 use crate::{
     KERNEL_DIRECT_MAPPING_BASE,
     allocator::Allocator,
-    debug,
+    kdebug,
     memory::{page_table_entry::PageTableEntry, virtual_address::VirtualAddress},
 };
 
@@ -63,16 +63,16 @@ impl PageTable {
         perm: Perm,
     ) {
         let mut buf = [0; 20];
-        debug(b"entered identity map\n".as_slice());
+        kdebug(b"entered identity map\n".as_slice());
 
         let va = addr.to_identity_mapped_va().unwrap();
 
-        debug(b"vpn_2: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_2() as u64, &mut buf));
-        debug(b"vpn_1: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_1() as u64, &mut buf));
-        debug(b"vpn_0: ".as_slice());
-        debug(crate::u64_to_str(va.vpn_0() as u64, &mut buf));
+        kdebug(b"vpn_2: ".as_slice());
+        kdebug(crate::u64_to_str(va.vpn_2() as u64, &mut buf));
+        kdebug(b"vpn_1: ".as_slice());
+        kdebug(crate::u64_to_str(va.vpn_1() as u64, &mut buf));
+        kdebug(b"vpn_0: ".as_slice());
+        kdebug(crate::u64_to_str(va.vpn_0() as u64, &mut buf));
 
         let l2_entry = &mut self.0[va.vpn_2()];
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
