@@ -1,4 +1,4 @@
-use crate::trap::TrapFrame;
+use crate::{context::Context, trap::TrapFrame};
 
 pub const PROC_TEXT_VA: u64 = 0x1_0000;
 pub const PROC_STACK_VA: u64 = 0x0000_0000_3fff_0fa0;
@@ -14,6 +14,8 @@ pub struct Process {
     pub root_table_pa: u64,
     /// Trap frame
     pub trap_frame: *mut TrapFrame,
+    /// Context
+    pub context: Context,
 }
 
 impl Process {}

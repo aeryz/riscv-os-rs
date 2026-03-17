@@ -11,7 +11,7 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{allocator::Allocator, driver::uart::Uart, memory::physical_address::PhysicalAddress};
+use crate::{allocator::Allocator, context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress};
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::{
     memory::page_table::{self, PageTable},
@@ -22,6 +22,7 @@ const QEMU_TEST: *mut u32 = 0x0010_0000 as *mut u32;
 
 pub mod allocator;
 pub mod console;
+pub mod context;
 pub mod driver;
 pub mod helper;
 pub mod memory;
@@ -48,6 +49,7 @@ const KERNEL_PA_BASE: u64 = 0x8020_0000;
 
 pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
 pub static UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
+pub static mut SCHEDULER_CTX: MaybeUninit<Context> = MaybeUninit::zeroed();
 
 unsafe extern "C" {
     static __text_start: u8;
@@ -189,7 +191,6 @@ pub fn initialize_kernel() -> ! {
 impl Kernel {
     #[inline(never)]
     pub fn create_process(&mut self, entry: u64) {
-        kinfo(b"loading the first user process\n");
         // we first initiate user's root page table
         let process_root_table_pa = self.allocator.alloc().unwrap();
         let process_root_table_va =
@@ -265,6 +266,7 @@ impl Kernel {
                 kernel_sp: kernel_sp_va.raw(),
                 root_table_pa: process_root_table_pa.raw(),
                 trap_frame: core::ptr::null_mut(),
+                context: Context::empty(),
             });
         }
 
@@ -340,8 +342,13 @@ pub extern "C" fn kinit_cont() -> ! {
     plic::plic_init_uart(0);
     UART.enable_interrupts();
 
+    // unsafe {
+    //     KERNEL.create_process(userspace::shell::shell as *const () as u64);
+    // };
+
     unsafe {
-        KERNEL.create_process(userspace::shell::shell as *const () as u64);
+        KERNEL.create_process(userspace::userspace_1 as *const () as u64);
+        KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 
     let process = unsafe { PROC_TABLE[0].assume_init_ref() };
@@ -387,13 +394,13 @@ pub fn enter_usermode(
 
     riscv::registers::Sscratch::new(kernel_stack).write();
 
-    let mut i: u64 = 0;
-    loop {
-        if i % 1_000_000_000 == 0 {
-            kdebug("press a key\n");
-        }
-        i += 1;
-    }
+    // let mut i: u64 = 0;
+    // loop {
+    //     if i % 1_000_000_000 == 0 {
+    //         kdebug("press a key\n");
+    //     }
+    //     i += 1;
+    // }
 
     riscv::sret(user_stack);
 }

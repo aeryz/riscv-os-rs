@@ -12,10 +12,6 @@ pub extern "C" fn shell() {
     unsafe { asm!(".align 12") };
 
     loop {
-        core::hint::spin_loop();
-    }
-
-    loop {
         let mut buf: [u8; 512] = [0; 512];
 
         let mut pos = 0;

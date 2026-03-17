@@ -2,9 +2,17 @@ use core::arch::global_asm;
 
 use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
+    context::Context,
     helper::{u64_to_str, u64_to_str_hex},
     kdebug, plic,
 };
+
+unsafe extern "C" {
+    #[allow(unused)]
+    fn swtch(from: *mut Context, to: *const Context);
+
+    fn trap_resume();
+}
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
 // This is required because:
@@ -16,6 +24,7 @@ global_asm!(
     r#"
     .section .text.trap
     .globl trap_entry
+    .globl trap_resume
     .align 2
 trap_entry:
 
@@ -70,20 +79,13 @@ trap_entry:
 
     csrr t0, scause
     sd t0, 32*8(sp)
-
-    // TODO: we used to switch satp but now we map the whole kernel to userspace as well
-    // ld t0, 32*8(sp)
-    // csrw satp, t0
-    // sfence.vma x0, x0
-    
+   
     // Move the trap frame (sitting at sp) as the first param
     mv a0, sp
     call trap_handler
 
-    mv sp, a0
-
+trap_resume:
     ld t0, 31*8(sp)
-    addi t0, t0, 4
     csrw sepc, t0
 
     ld ra,  0*8(sp)
@@ -178,7 +180,7 @@ impl TrapFrame {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
+extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     trap_frame.a0 = 0xffffffffffffffff; // -1
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
     match trap_frame.scause {
@@ -190,6 +192,8 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
         }
         // I = 0, C = 8 = environment call from U-Mode
         8 => {
+            // This is a syscall, so we move the return program counter to just after the `ecall`
+            trap_frame.sepc += 4;
             let syscall_number = trap_frame.a7;
             match syscall_number {
                 SYSCALL_WRITE => {
@@ -216,7 +220,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
                 _ => unreachable!(),
             }
 
-            schedule(trap_frame)
+            schedule()
         }
         _ => {
             unreachable!()
@@ -224,40 +228,32 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
     }
 }
 
-// TODO: temporary function to schedule a new process
-fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
+fn schedule() {
     let mut buf = [0; 20];
 
-    let mut current_proc = unsafe { KERNEL.current_running_proc } as u64;
+    let mut current_proc_id = unsafe { KERNEL.current_running_proc } as u64;
 
-    unsafe {
-        PROC_TABLE[current_proc as usize]
-            .assume_init_mut()
-            .trap_frame = trap_frame as *mut TrapFrame;
-    }
+    let current_process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
-    kdebug("current proc: ");
-    kdebug(u64_to_str(
-        unsafe { KERNEL.current_running_proc } as u64,
-        &mut buf,
-    ));
+    kdebug("current proc: \n\t");
+    kdebug(u64_to_str(current_proc_id, &mut buf));
 
-    if current_proc + 1 >= unsafe { KERNEL.n_procs } as u64 {
-        current_proc = 0;
+    if current_proc_id + 1 >= unsafe { KERNEL.n_procs } as u64 {
+        current_proc_id = 0;
         unsafe {
             KERNEL.current_running_proc = 0;
         }
     } else {
-        current_proc += 1;
+        current_proc_id += 1;
         unsafe {
             KERNEL.current_running_proc += 1;
         }
     }
 
-    let process = unsafe { PROC_TABLE[current_proc as usize].assume_init_ref() };
+    let process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
-    kdebug("switching to: ");
-    kdebug(u64_to_str(current_proc, &mut buf));
+    kdebug("switching to: \n\t");
+    kdebug(u64_to_str(current_proc_id, &mut buf));
 
     riscv::registers::Satp::empty()
         .set_mode(riscv::registers::SatpMode::Sv39)
@@ -265,17 +261,26 @@ fn schedule(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
         .write();
 
     if process.trap_frame.is_null() {
-        kdebug("trap frame is null, so setting it to: ");
         let tf = (process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
+        kdebug("trap frame is null, so setting it to: ");
         kdebug(u64_to_str_hex(tf as u64, &mut buf));
+        process.trap_frame = tf;
+
         unsafe {
-            // TODO: -4 is a temporary hack to make trap entry sepc + 4 work
-            (*tf).sepc = crate::process::PROC_TEXT_VA as usize - 4;
+            (*tf).sepc = crate::process::PROC_TEXT_VA as usize;
             (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
         }
-        tf
+        process.context.sp = tf as u64;
+        process.context.ra = trap_resume as *const () as u64;
     } else {
         kdebug("trap frame is not null\n");
-        process.trap_frame
+    }
+
+    // TODO: this is UB if the `current_process` == `process`
+    unsafe {
+        swtch(
+            (&mut current_process.context) as *mut Context,
+            (&process.context) as *const Context,
+        );
     }
 }
