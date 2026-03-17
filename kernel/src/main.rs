@@ -25,6 +25,7 @@ pub mod console;
 pub mod driver;
 pub mod helper;
 pub mod memory;
+pub mod plic;
 pub mod process;
 pub mod trap;
 pub(crate) mod userspace;
@@ -279,8 +280,18 @@ impl Kernel {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn kmain() -> ! {
+pub extern "C" fn kmain(hart_id: u64, dtb_pa: u64) -> ! {
     kdebug(b"hello world from kernel\n");
+
+    let mut buf = [0; 20];
+    kdebug("hart id: ");
+    kdebug(u64_to_str(hart_id, &mut buf));
+    kdebug("dtb pa: ");
+    kdebug(u64_to_str_hex(dtb_pa, &mut buf));
+
+    let magic = u32::from_be(unsafe { *(dtb_pa as *const u32) });
+    kdebug("magic: ");
+    kdebug(u64_to_str_hex(magic as u64, &mut buf));
 
     enter_supervisor(start as *const () as usize);
 }
@@ -311,8 +322,8 @@ pub extern "C" fn start() -> ! {
 
     unsafe {
         asm!(
-            "li t1, 32",
-            "csrs sie, t1" // Timer interrupt enable flag: STIE
+            "li t1, 512",
+            "csrs sie, t1" // SEIE
         )
     }
 
@@ -325,6 +336,9 @@ pub extern "C" fn kinit_cont() -> ! {
     let mut buf = [0; 20];
     kdebug(b"kernel is loaded at after paging: ");
     kdebug(u64_to_str_hex(kernel_addr, &mut buf));
+
+    plic::plic_init_uart(0);
+    UART.enable_interrupts();
 
     unsafe {
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
@@ -361,7 +375,7 @@ pub fn enter_usermode(
 
     riscv::registers::Sstatus::read()
         .enable_user_mode()
-        .disable_supervisor_interrupts()
+        .enable_supervisor_interrupts()
         .enable_user_page_access()
         .write();
 
@@ -372,6 +386,14 @@ pub fn enter_usermode(
     }
 
     riscv::registers::Sscratch::new(kernel_stack).write();
+
+    let mut i: u64 = 0;
+    loop {
+        if i % 1_000_000_000 == 0 {
+            kdebug("press a key\n");
+        }
+        i += 1;
+    }
 
     riscv::sret(user_stack);
 }

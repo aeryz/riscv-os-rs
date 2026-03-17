@@ -13,6 +13,9 @@ impl Sstatus {
     pub const SIE_SHIFT: u64 = 1;
     pub const SIE_MASK: u64 = 1 << Self::SIE_SHIFT;
 
+    pub const SPIE_SHIFT: u64 = 5;
+    pub const SPIE_MASK: u64 = 1 << Self::SPIE_SHIFT;
+
     #[must_use]
     pub fn enable_user_page_access(self) -> Self {
         self.set_sum()
@@ -21,6 +24,11 @@ impl Sstatus {
     #[must_use]
     pub fn enable_user_mode(self) -> Self {
         self.set_spp(SstatusSpp::U)
+    }
+
+    #[must_use]
+    pub fn enable_supervisor_interrupts(self) -> Self {
+        self.set_spie().set_sie()
     }
 
     #[must_use]
@@ -37,6 +45,12 @@ impl Sstatus {
     #[must_use]
     pub fn set_sie(mut self) -> Self {
         self.0 |= Self::SIE_MASK;
+        self
+    }
+
+    #[must_use]
+    pub fn set_spie(mut self) -> Self {
+        self.0 |= Self::SPIE_MASK;
         self
     }
 

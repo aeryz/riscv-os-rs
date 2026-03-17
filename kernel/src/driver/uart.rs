@@ -1,3 +1,4 @@
+const UART_IER: usize = 1;
 const UART_RHR: usize = 0;
 const UART_LSR: usize = 5;
 
@@ -10,6 +11,14 @@ pub struct Uart {
 impl Uart {
     pub const fn new(base: usize) -> Self {
         Self { base }
+    }
+
+    pub fn enable_interrupts(&self) {
+        unsafe {
+            core::ptr::write_volatile((self.base + UART_IER) as *mut u8, 0b1);
+            // TODO: check the parity stuff
+            core::ptr::write_volatile((self.base + UART_LSR) as *mut u8, 0b11);
+        }
     }
 
     /// Tries reading a single character from the device. It's nonblocking so if the

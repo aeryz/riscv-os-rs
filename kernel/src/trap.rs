@@ -3,7 +3,7 @@ use core::arch::global_asm;
 use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
     helper::{u64_to_str, u64_to_str_hex},
-    kdebug,
+    kdebug, plic,
 };
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
@@ -180,9 +180,15 @@ impl TrapFrame {
 #[unsafe(no_mangle)]
 extern "C" fn trap_handler(trap_frame: &mut TrapFrame) -> *mut TrapFrame {
     trap_frame.a0 = 0xffffffffffffffff; // -1
+    // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
     match trap_frame.scause {
-        // 8 = environment call from U-Mode
-        // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
+        // I = 1, C = 9 = supervisor external interrupt
+        0x8000000000000009 => {
+            // TODO: only support the hart = 0
+            plic::plic_claim(0);
+            todo!()
+        }
+        // I = 0, C = 8 = environment call from U-Mode
         8 => {
             let syscall_number = trap_frame.a7;
             match syscall_number {
