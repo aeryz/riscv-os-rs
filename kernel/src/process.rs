@@ -1,9 +1,10 @@
 use crate::{context::Context, trap::TrapFrame};
 
 pub const PROC_TEXT_VA: u64 = 0x1_0000;
-pub const PROC_STACK_VA: u64 = 0x0000_0000_3fff_0fa0;
+pub const PROC_STACK_VA: u64 = 0x0000_0000_3fff_3fa0;
 
 #[derive(Clone)]
+#[repr(C)]
 pub struct Process {
     // TODO: pid is only the index in the proc table right now
     /// Process ID
@@ -18,6 +19,17 @@ pub struct Process {
     pub context: Context,
     /// The tick count at when the process started running
     pub ticks_at_started_running: u64,
+    /// The current state of the process
+    pub state: State,
+    /// Wake up time in ticks
+    pub wake_up_at: u64,
 }
 
-impl Process {}
+#[derive(Clone)]
+#[repr(C)]
+pub enum State {
+    Sleeping,
+    Running,
+    Ready,
+    Blocked,
+}

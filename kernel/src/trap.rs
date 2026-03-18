@@ -1,10 +1,10 @@
 use core::arch::global_asm;
 
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
+    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SLEEP_MS, SYSCALL_WRITE, console,
     context::Context,
     helper::{u64_to_str, u64_to_str_hex},
-    ktrace, plic,
+    ktrace, plic, process,
 };
 
 unsafe extern "C" {
@@ -181,6 +181,11 @@ impl TrapFrame {
 
 #[unsafe(no_mangle)]
 extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
+    unsafe {
+        PROC_TABLE[KERNEL.current_running_proc]
+            .assume_init_mut()
+            .state = process::State::Ready;
+    }
     trap_frame.a0 = 0xffffffffffffffff; // -1
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
     match trap_frame.scause {
@@ -251,6 +256,20 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     let n_read = syscall_read(buf);
                     trap_frame.a0 = n_read;
                 }
+                SYSCALL_SLEEP_MS => {
+                    let ms = trap_frame.a0 as u64;
+
+                    let current_process =
+                        unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
+
+                    let ms_to_ticks = |ticks: u64| ticks * 10_000_000 / 1_000;
+
+                    current_process.state = process::State::Sleeping;
+                    current_process.wake_up_at =
+                        riscv::registers::Time::read().raw() + ms_to_ticks(ms);
+
+                    schedule(false);
+                }
                 _ => unreachable!(),
             }
         }
@@ -260,67 +279,99 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     }
 }
 
+fn find_next_available_proc_id(mut current_proc_id: usize) -> usize {
+    let time = riscv::registers::Time::read().raw();
+    loop {
+        if current_proc_id + 1 >= unsafe { KERNEL.n_procs } {
+            current_proc_id = 0;
+        } else {
+            current_proc_id += 1;
+        }
+        let proc = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
+
+        match proc.state {
+            process::State::Sleeping => {
+                if time > proc.wake_up_at {
+                    proc.wake_up_at = 0;
+                    return current_proc_id;
+                }
+            }
+            process::State::Running => {}
+            process::State::Ready => {
+                crate::kdebug("going to run: \n");
+                let mut buf = [0; 20];
+                crate::kdebug(u64_to_str(current_proc_id as u64, &mut buf));
+                return current_proc_id;
+            }
+            process::State::Blocked => {
+                unimplemented!()
+            }
+        }
+    }
+}
+
 fn schedule(reset_timer: bool) {
     let mut buf = [0; 20];
 
-    let mut current_proc_id = unsafe { KERNEL.current_running_proc } as u64;
+    let current_proc_id = unsafe { KERNEL.current_running_proc } as u64;
 
     let current_process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
     ktrace("current proc: \n\t");
     ktrace(u64_to_str(current_proc_id, &mut buf));
 
-    if current_proc_id + 1 >= unsafe { KERNEL.n_procs } as u64 {
-        current_proc_id = 0;
-        unsafe {
-            KERNEL.current_running_proc = 0;
-        }
-    } else {
-        current_proc_id += 1;
-        unsafe {
-            KERNEL.current_running_proc += 1;
-        }
-    }
+    let next_proc_id = find_next_available_proc_id(current_proc_id as usize);
 
-    let process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
+    let next_process = unsafe { PROC_TABLE[next_proc_id].assume_init_mut() };
 
     ktrace("switching to: \n\t");
-    ktrace(u64_to_str(current_proc_id, &mut buf));
+    ktrace(u64_to_str(next_proc_id as u64, &mut buf));
 
     riscv::registers::Satp::empty()
         .set_mode(riscv::registers::SatpMode::Sv39)
-        .set_ppn(process.root_table_pa)
+        .set_ppn(next_process.root_table_pa)
         .write();
 
-    if process.trap_frame.is_null() {
-        let tf = (process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
+    if next_process.trap_frame.is_null() {
+        let tf = (next_process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
         ktrace("trap frame is null, so setting it to: ");
         ktrace(u64_to_str_hex(tf as u64, &mut buf));
-        process.trap_frame = tf;
+        next_process.trap_frame = tf;
 
         unsafe {
             (*tf).sepc = crate::process::PROC_TEXT_VA as usize;
             (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
         }
-        process.context.sp = tf as u64;
-        process.context.ra = trap_resume as *const () as u64;
+        next_process.context.sp = tf as u64;
+        next_process.context.ra = trap_resume as *const () as u64;
     } else {
         ktrace("trap frame is not null\n");
     }
 
-    process.ticks_at_started_running = riscv::registers::Time::read().raw();
+    next_process.ticks_at_started_running = riscv::registers::Time::read().raw();
 
     if reset_timer {
         // 4ms
-        riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + process.ticks_at_started_running)
-            .write();
+        riscv::registers::Stimecmp::new(
+            4 * 10_000_000 / 1_000 + next_process.ticks_at_started_running,
+        )
+        .write();
     }
 
-    // TODO: this is UB if the `current_process` == `process`
+    next_process.state = process::State::Running;
+
+    if current_proc_id == next_proc_id as u64 {
+        return;
+    }
+
+    unsafe {
+        KERNEL.current_running_proc = next_proc_id;
+    }
+
     unsafe {
         swtch(
             (&mut current_process.context) as *mut Context,
-            (&process.context) as *const Context,
+            (&next_process.context) as *const Context,
         );
     }
 }

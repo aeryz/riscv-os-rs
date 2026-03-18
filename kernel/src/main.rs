@@ -11,7 +11,7 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{allocator::Allocator, context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress};
+use crate::{allocator::Allocator, context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress, process::State};
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::{
     memory::page_table::{self, PageTable},
@@ -42,6 +42,7 @@ const UART_PHYSICAL_ADDR: u64 = 0x10000000;
 
 const SYSCALL_WRITE: usize = 1;
 const SYSCALL_READ: usize = 2;
+const SYSCALL_SLEEP_MS: usize = 3;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
@@ -215,17 +216,20 @@ impl Kernel {
             }
         }
             
-        let user_stack = self.allocator.alloc().unwrap();
+        // 16K stack
+        for i in 0..4 {
+            let user_stack = self.allocator.alloc().unwrap();
 
-        unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_3fff_0000).unwrap(),
-                user_stack,
-                &mut self.allocator,
-                page_table::Perm::Write,
-                true,
-            )
-        };
+            unsafe {
+                (*process_root_table).map_user_memory(
+                    VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
+                    user_stack,
+                    &mut self.allocator,
+                    page_table::Perm::Write,
+                    true,
+                )
+            };
+        }
 
         let kernel_stack = self.allocator.alloc().unwrap();
         let kernel_stack_va =
@@ -254,6 +258,8 @@ impl Kernel {
                 trap_frame: core::ptr::null_mut(),
                 context: Context::empty(),
                 ticks_at_started_running: 0,
+                state: State::Ready,
+                wake_up_at: 0
             });
         }
 
