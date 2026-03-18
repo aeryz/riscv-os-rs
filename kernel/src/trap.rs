@@ -187,8 +187,27 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
         // I = 1, C = 9 = supervisor external interrupt
         0x8000000000000009 => {
             // TODO: only support the hart = 0
-            plic::plic_claim(0);
-            todo!()
+            let interrupt_id = plic::plic_claim(0);
+            match interrupt_id {
+                crate::plic::UART0_IRQ => {
+                    kdebug("this is a uart interrupt: ");
+
+                    let mut buf = [0; 10];
+                    let iir = crate::UART.read_iir();
+                    kdebug("uart iir: ");
+                    kdebug(u64_to_str(iir as u64, &mut buf));
+                    let val = crate::UART.try_get_char().unwrap_or(0);
+                    plic::plic_complete(0, crate::plic::UART0_IRQ);
+                    if val != 0 {
+                        // TODO: this is only for fun to see the context switch happen on a key press
+                        // which is cool
+                        schedule();
+                    }
+                }
+                _ => {
+                    kdebug("i dont know this interrupt sorry");
+                }
+            }
         }
         // I = 0, C = 8 = environment call from U-Mode
         8 => {
@@ -220,7 +239,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 _ => unreachable!(),
             }
 
-            schedule()
+            // schedule()
         }
         _ => {
             unreachable!()

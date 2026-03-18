@@ -1,6 +1,6 @@
 use crate::KERNEL_DIRECT_MAPPING_BASE;
 
-const UART0_IRQ: u32 = 10;
+pub const UART0_IRQ: u32 = 10;
 
 const PLIC: u64 = 0x0c00_0000 + KERNEL_DIRECT_MAPPING_BASE;
 
