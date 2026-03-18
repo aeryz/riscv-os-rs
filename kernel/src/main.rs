@@ -393,8 +393,9 @@ pub fn enter_usermode(
         ms * TIMER_FREQ / 1000
     }
     
+    let time = riscv::registers::Time::read().raw();
+    riscv::registers::Stimecmp::new(time + ms_to_ticks(8)).write();
     riscv::registers::Sie::empty().enable_external_interrupts().enable_timer_interrupt().write();
-    riscv::registers::Stimecmp::new(ms_to_ticks(4)).write();
 
     riscv::sret(user_stack);
 }

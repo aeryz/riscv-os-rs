@@ -4,7 +4,7 @@ use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
     context::Context,
     helper::{u64_to_str, u64_to_str_hex},
-    kdebug, ktrace, plic,
+    ktrace, plic,
 };
 
 unsafe extern "C" {
@@ -190,7 +190,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             let interrupt_id = plic::plic_claim(0);
             match interrupt_id {
                 crate::plic::UART0_IRQ => {
-                    kdebug("this is a uart interrupt: ");
+                    ktrace("this is a uart interrupt: \n");
 
                     while let Some(_val) = unsafe { crate::UART.read_char_into_buffer() } {
                         // TODO: can debug here
@@ -198,8 +198,30 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     plic::plic_complete(0, crate::plic::UART0_IRQ);
                 }
                 _ => {
-                    kdebug("i dont know this interrupt sorry");
+                    ktrace("i dont know this interrupt sorry\n");
                 }
+            }
+        }
+        // I = 1, C = 5 = timer tick
+        0x8000000000000005 => {
+            ktrace("timer interrupt");
+            let current_process =
+                unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
+
+            let nanos = |ticks: u64| ticks * 1_000_000_000 / 10_000_000;
+
+            let current_ticks = riscv::registers::Time::read().raw();
+
+            // 32ms
+            if nanos(current_ticks) - nanos(current_process.ticks_at_started_running)
+                > 4_000_000 * 8
+            {
+                ktrace("\ncalling schedule\n");
+                schedule(true);
+            } else {
+                ktrace("\nhavent hit the timer yet\n");
+                // 4ms
+                riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + current_ticks).write();
             }
         }
         // I = 0, C = 8 = environment call from U-Mode
@@ -231,8 +253,6 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 }
                 _ => unreachable!(),
             }
-
-            schedule()
         }
         _ => {
             unreachable!()
@@ -240,7 +260,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     }
 }
 
-fn schedule() {
+fn schedule(reset_timer: bool) {
     let mut buf = [0; 20];
 
     let mut current_proc_id = unsafe { KERNEL.current_running_proc } as u64;
@@ -288,6 +308,14 @@ fn schedule() {
         ktrace("trap frame is not null\n");
     }
 
+    process.ticks_at_started_running = riscv::registers::Time::read().raw();
+
+    if reset_timer {
+        // 4ms
+        riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + process.ticks_at_started_running)
+            .write();
+    }
+
     // TODO: this is UB if the `current_process` == `process`
     unsafe {
         swtch(
@@ -303,7 +331,7 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
         loop {
             match unsafe { crate::UART.try_get_char() } {
                 Some(c) => {
-                    kdebug("read something, not scheduling");
+                    ktrace("read something, not scheduling\n");
                     if c == b'\n' || c == b'\r' {
                         return i;
                     }
@@ -312,8 +340,8 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
                     break;
                 }
                 None => {
-                    kdebug("couldn't read anything, scheduling");
-                    schedule()
+                    ktrace("couldn't read anything, scheduling\n");
+                    schedule(false);
                 }
             }
         }
