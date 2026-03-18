@@ -4,7 +4,7 @@ use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_WRITE, console,
     context::Context,
     helper::{u64_to_str, u64_to_str_hex},
-    kdebug, plic,
+    kdebug, ktrace, plic,
 };
 
 unsafe extern "C" {
@@ -192,17 +192,10 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 crate::plic::UART0_IRQ => {
                     kdebug("this is a uart interrupt: ");
 
-                    let mut buf = [0; 10];
-                    let iir = crate::UART.read_iir();
-                    kdebug("uart iir: ");
-                    kdebug(u64_to_str(iir as u64, &mut buf));
-                    let val = crate::UART.try_get_char().unwrap_or(0);
-                    plic::plic_complete(0, crate::plic::UART0_IRQ);
-                    if val != 0 {
-                        // TODO: this is only for fun to see the context switch happen on a key press
-                        // which is cool
-                        schedule();
+                    while let Some(_val) = unsafe { crate::UART.read_char_into_buffer() } {
+                        // TODO: can debug here
                     }
+                    plic::plic_complete(0, crate::plic::UART0_IRQ);
                 }
                 _ => {
                     kdebug("i dont know this interrupt sorry");
@@ -233,13 +226,13 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
                     let buf = unsafe { core::slice::from_raw_parts_mut(buf, count) };
 
-                    let n_read = console::readline(buf);
+                    let n_read = syscall_read(buf);
                     trap_frame.a0 = n_read;
                 }
                 _ => unreachable!(),
             }
 
-            // schedule()
+            schedule()
         }
         _ => {
             unreachable!()
@@ -254,8 +247,8 @@ fn schedule() {
 
     let current_process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
-    kdebug("current proc: \n\t");
-    kdebug(u64_to_str(current_proc_id, &mut buf));
+    ktrace("current proc: \n\t");
+    ktrace(u64_to_str(current_proc_id, &mut buf));
 
     if current_proc_id + 1 >= unsafe { KERNEL.n_procs } as u64 {
         current_proc_id = 0;
@@ -271,8 +264,8 @@ fn schedule() {
 
     let process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
-    kdebug("switching to: \n\t");
-    kdebug(u64_to_str(current_proc_id, &mut buf));
+    ktrace("switching to: \n\t");
+    ktrace(u64_to_str(current_proc_id, &mut buf));
 
     riscv::registers::Satp::empty()
         .set_mode(riscv::registers::SatpMode::Sv39)
@@ -281,8 +274,8 @@ fn schedule() {
 
     if process.trap_frame.is_null() {
         let tf = (process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
-        kdebug("trap frame is null, so setting it to: ");
-        kdebug(u64_to_str_hex(tf as u64, &mut buf));
+        ktrace("trap frame is null, so setting it to: ");
+        ktrace(u64_to_str_hex(tf as u64, &mut buf));
         process.trap_frame = tf;
 
         unsafe {
@@ -292,7 +285,7 @@ fn schedule() {
         process.context.sp = tf as u64;
         process.context.ra = trap_resume as *const () as u64;
     } else {
-        kdebug("trap frame is not null\n");
+        ktrace("trap frame is not null\n");
     }
 
     // TODO: this is UB if the `current_process` == `process`
@@ -302,4 +295,29 @@ fn schedule() {
             (&process.context) as *const Context,
         );
     }
+}
+
+pub fn syscall_read(buf: &mut [u8]) -> usize {
+    let mut i = 0;
+    while i < buf.len() {
+        loop {
+            match unsafe { crate::UART.try_get_char() } {
+                Some(c) => {
+                    kdebug("read something, not scheduling");
+                    if c == b'\n' || c == b'\r' {
+                        return i;
+                    }
+                    buf[i] = c;
+                    i += 1;
+                    break;
+                }
+                None => {
+                    kdebug("couldn't read anything, scheduling");
+                    schedule()
+                }
+            }
+        }
+    }
+
+    i
 }

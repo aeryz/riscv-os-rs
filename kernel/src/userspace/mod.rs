@@ -26,7 +26,7 @@ pub extern "C" fn userspace_2() -> ! {
     loop {
         i += 1;
 
-        if i % 1_000_000_000 == 0 {
+        if i % 3_000_000_000 == 0 {
             let _ = write("[2] writing babeee");
         }
     }

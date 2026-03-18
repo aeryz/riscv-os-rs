@@ -48,7 +48,7 @@ const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
 const KERNEL_PA_BASE: u64 = 0x8020_0000;
 
 pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
-pub static UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
+pub static mut UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
 pub static mut SCHEDULER_CTX: MaybeUninit<Context> = MaybeUninit::zeroed();
 
 unsafe extern "C" {
@@ -201,34 +201,20 @@ impl Kernel {
 
         // we don't do heap for now
         // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
-        unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_0001_0000).unwrap(),
-                PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000),
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                true,
-            )
-        };
-        unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_0001_1000).unwrap(),
-                PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000),
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                true,
-            )
-        };
-        unsafe {
-            (*process_root_table).map_user_memory(
-                VirtualAddress::from_raw(0x0000_0000_0001_2000).unwrap(),
-                PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x2000),
-                &mut self.allocator,
-                page_table::Perm::Execute,
-                true,
-            )
-        };
 
+        // Assuming the code is at most 16K
+        for i in 0..4 {
+            unsafe {
+                (*process_root_table).map_user_memory(
+                    VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
+                    PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000 * i),
+                    &mut self.allocator,
+                    page_table::Perm::Execute,
+                    true,
+                );
+            }
+        }
+            
         let user_stack = self.allocator.alloc().unwrap();
 
         unsafe {
@@ -340,14 +326,14 @@ pub extern "C" fn kinit_cont() -> ! {
     kdebug(u64_to_str_hex(kernel_addr, &mut buf));
 
     plic::plic_init_uart(0);
-    UART.enable_interrupts();
+    unsafe { UART.enable_interrupts(); }
 
     // unsafe {
     //     KERNEL.create_process(userspace::shell::shell as *const () as u64);
     // };
 
     unsafe {
-        KERNEL.create_process(userspace::userspace_1 as *const () as u64);
+        KERNEL.create_process(userspace::shell::shell as *const () as u64);
         KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 
