@@ -54,3 +54,14 @@ macro_rules! def_impl_control_register {
         $crate::impl_control_register!($ty, $csr);
     };
 }
+
+#[macro_export]
+macro_rules! impl_bit_set {
+    ($set_fn:ident, $mask:ident) => {
+        #[must_use]
+        pub fn $set_fn(mut self) -> Self {
+            self.0 |= Self::$mask;
+            self
+        }
+    };
+}

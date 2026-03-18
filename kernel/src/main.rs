@@ -253,6 +253,7 @@ impl Kernel {
                 root_table_pa: process_root_table_pa.raw(),
                 trap_frame: core::ptr::null_mut(),
                 context: Context::empty(),
+                ticks_at_started_running: 0,
             });
         }
 
@@ -286,13 +287,25 @@ pub extern "C" fn kmain(hart_id: u64, dtb_pa: u64) -> ! {
 
 #[inline(always)]
 pub fn enter_supervisor(entry: usize) -> ! {
+    // `mret` will jump to `mepc` which is `entry`.
     riscv::registers::Mepc::new(entry as u64).write();
+    // Enable the supervisor mode so that `mret` starts executing in the S-mode.
     riscv::registers::Mstatus::read()
         .enable_supervisor_mode()
         .write();
+    // Delegate all interrupt handlings to S-mode.
     riscv::registers::Mideleg::empty().delegate_all().write();
     riscv::registers::Medeleg::empty().delegate_all().write();
 
+    // Enable access to `rdtime` pseudo-instruction by the S-mode.
+    riscv::registers::Mcounteren::empty().enable_access_to_time().write();
+
+    // Enable the `stimecmp` register in S-mode.
+    riscv::registers::Menvcfg::empty().enable_stimecmp().write();
+
+    // Enable access to all memory.
+    // TODO: Idk if we need to do anything here because we already do memory management in the
+    // S-mode. Let's check what Linux does here.
     riscv::registers::Pmpaddr0::new(0x2fffffffffffffff).write();
     riscv::registers::Pmpcfg0::empty()
         .enable_tor()
@@ -301,19 +314,13 @@ pub fn enter_supervisor(entry: usize) -> ! {
         .set_executable()
         .write();
 
+    // Return to address at `mepc`(entry) and start executing in the mode set in `mstatus`(S-mode)
     riscv::mret();
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn start() -> ! {
     kdebug(b"hello from the supervisor\n");
-
-    unsafe {
-        asm!(
-            "li t1, 512",
-            "csrs sie, t1" // SEIE
-        )
-    }
 
     initialize_kernel();
 }
@@ -380,13 +387,14 @@ pub fn enter_usermode(
 
     riscv::registers::Sscratch::new(kernel_stack).write();
 
-    // let mut i: u64 = 0;
-    // loop {
-    //     if i % 1_000_000_000 == 0 {
-    //         kdebug("press a key\n");
-    //     }
-    //     i += 1;
-    // }
+    const TIMER_FREQ: u64 = 10_000_000;
+
+    fn ms_to_ticks(ms: u64) -> u64 {
+        ms * TIMER_FREQ / 1000
+    }
+    
+    riscv::registers::Sie::empty().enable_external_interrupts().enable_timer_interrupt().write();
+    riscv::registers::Stimecmp::new(ms_to_ticks(4)).write();
 
     riscv::sret(user_stack);
 }

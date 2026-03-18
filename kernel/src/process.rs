@@ -16,6 +16,8 @@ pub struct Process {
     pub trap_frame: *mut TrapFrame,
     /// Context
     pub context: Context,
+    /// The tick count at when the process started running
+    pub ticks_at_started_running: u64,
 }
 
 impl Process {}
