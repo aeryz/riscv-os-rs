@@ -4,7 +4,7 @@ use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SLEEP_MS, SYSCALL_WRITE, console,
     context::Context,
     helper::{u64_to_str, u64_to_str_hex},
-    ktrace, plic, process,
+    kdebug, ktrace, plic, process,
 };
 
 unsafe extern "C" {
@@ -184,7 +184,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     unsafe {
         PROC_TABLE[KERNEL.current_running_proc]
             .assume_init_mut()
-            .state = process::State::Ready;
+            .trap_frame = trap_frame as *mut TrapFrame;
     }
     trap_frame.a0 = 0xffffffffffffffff; // -1
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
@@ -197,9 +197,24 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 crate::plic::UART0_IRQ => {
                     ktrace("this is a uart interrupt: \n");
 
+                    let mut read_anything = false;
                     while let Some(_val) = unsafe { crate::UART.read_char_into_buffer() } {
+                        read_anything = true;
                         // TODO: can debug here
                     }
+
+                    if read_anything {
+                        unsafe {
+                            // Whenever a read happens, iterate through the uart queue and set all the waiting processes to
+                            // ready.
+                            for idx in KERNEL.uart_wait_queue.iter_mut().take_while(|i| **i != 0) {
+                                PROC_TABLE[*idx].assume_init_mut().state = process::State::Ready;
+                                *idx = 0;
+                            }
+                            KERNEL.uart_wait_queue_len = 0;
+                        }
+                    }
+
                     plic::plic_complete(0, crate::plic::UART0_IRQ);
                 }
                 _ => {
@@ -221,10 +236,13 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             if nanos(current_ticks) - nanos(current_process.ticks_at_started_running)
                 > 4_000_000 * 8
             {
-                ktrace("\ncalling schedule\n");
+                unsafe {
+                    PROC_TABLE[KERNEL.current_running_proc]
+                        .assume_init_mut()
+                        .state = process::State::Ready;
+                }
                 schedule(true);
             } else {
-                ktrace("\nhavent hit the timer yet\n");
                 // 4ms
                 riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + current_ticks).write();
             }
@@ -279,11 +297,14 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     }
 }
 
-fn find_next_available_proc_id(mut current_proc_id: usize) -> usize {
+fn find_next_available_proc_id(mut current_proc_id: usize) -> Option<usize> {
     let time = riscv::registers::Time::read().raw();
-    loop {
+
+    // We bypass the idle task by doing `KERNEL.n_procs - 1` iterations
+    for _ in unsafe { 0..(KERNEL.n_procs - 1) } {
         if current_proc_id + 1 >= unsafe { KERNEL.n_procs } {
-            current_proc_id = 0;
+            // We bypass the idle task here
+            current_proc_id = 1;
         } else {
             current_proc_id += 1;
         }
@@ -293,21 +314,21 @@ fn find_next_available_proc_id(mut current_proc_id: usize) -> usize {
             process::State::Sleeping => {
                 if time > proc.wake_up_at {
                     proc.wake_up_at = 0;
-                    return current_proc_id;
+                    return Some(current_proc_id);
                 }
             }
             process::State::Running => {}
             process::State::Ready => {
-                crate::kdebug("going to run: \n");
+                crate::ktrace("going to run: \n");
                 let mut buf = [0; 20];
-                crate::kdebug(u64_to_str(current_proc_id as u64, &mut buf));
-                return current_proc_id;
+                crate::ktrace(u64_to_str(current_proc_id as u64, &mut buf));
+                return Some(current_proc_id);
             }
-            process::State::Blocked => {
-                unimplemented!()
-            }
+            process::State::Blocked => {}
         }
     }
+
+    None
 }
 
 fn schedule(reset_timer: bool) {
@@ -317,15 +338,9 @@ fn schedule(reset_timer: bool) {
 
     let current_process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
-    ktrace("current proc: \n\t");
-    ktrace(u64_to_str(current_proc_id, &mut buf));
-
-    let next_proc_id = find_next_available_proc_id(current_proc_id as usize);
+    let next_proc_id = find_next_available_proc_id(current_proc_id as usize).unwrap_or(0);
 
     let next_process = unsafe { PROC_TABLE[next_proc_id].assume_init_mut() };
-
-    ktrace("switching to: \n\t");
-    ktrace(u64_to_str(next_proc_id as u64, &mut buf));
 
     riscv::registers::Satp::empty()
         .set_mode(riscv::registers::SatpMode::Sv39)
@@ -360,6 +375,12 @@ fn schedule(reset_timer: bool) {
 
     next_process.state = process::State::Running;
 
+    kdebug("current proc: \n\t");
+    kdebug(u64_to_str(current_proc_id, &mut buf));
+
+    kdebug("switching to: \n\t");
+    kdebug(u64_to_str(next_proc_id as u64, &mut buf));
+
     if current_proc_id == next_proc_id as u64 {
         return;
     }
@@ -392,6 +413,17 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
                 }
                 None => {
                     ktrace("couldn't read anything, scheduling\n");
+                    unsafe {
+                        PROC_TABLE[KERNEL.current_running_proc]
+                            .assume_init_mut()
+                            .state = process::State::Blocked;
+                    }
+                    unsafe {
+                        KERNEL.uart_wait_queue[KERNEL.uart_wait_queue_len] =
+                            KERNEL.current_running_proc;
+                        KERNEL.uart_wait_queue_len += 1;
+                    }
+
                     schedule(false);
                 }
             }

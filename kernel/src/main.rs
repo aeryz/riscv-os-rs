@@ -63,6 +63,9 @@ pub static mut KERNEL: Kernel = Kernel {
     root_page_table: ptr::null_mut(),
     current_running_proc: 0,
     n_procs: 0,
+    // TODO: temporary queue to store the processes that are blocked by the uart
+    uart_wait_queue: [0; 16],
+    uart_wait_queue_len: 0,
 };
 
 pub static mut PROC_TABLE: [MaybeUninit<Process>; 2] = [const { MaybeUninit::uninit() }; 2];
@@ -86,6 +89,8 @@ pub struct Kernel {
     root_page_table: *mut PageTable,
     current_running_proc: usize,
     n_procs: usize,
+    uart_wait_queue: [usize; 16],
+    uart_wait_queue_len: usize,
 }
 
 #[derive(PartialEq, PartialOrd)]
@@ -203,8 +208,8 @@ impl Kernel {
         // we don't do heap for now
         // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
 
-        // Assuming the code is at most 16K
-        for i in 0..4 {
+        // Assuming the code is at most 32K
+        for i in 0..8 {
             unsafe {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
@@ -346,11 +351,16 @@ pub extern "C" fn kinit_cont() -> ! {
     // };
 
     unsafe {
+        KERNEL.create_process(idle_task as *const () as u64);
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
-        KERNEL.create_process(userspace::userspace_2 as *const () as u64);
+        // KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 
-    let process = unsafe { PROC_TABLE[0].assume_init_ref() };
+
+    unsafe {
+        KERNEL.current_running_proc = 1;
+    }
+    let process = unsafe { PROC_TABLE[1].assume_init_ref() };
 
     enter_usermode(
         process::PROC_TEXT_VA,
@@ -407,87 +417,22 @@ pub fn enter_usermode(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn user_proc_1() {
-    unsafe { asm!(".align 12") };
+#[inline(never)]
+extern "C" fn idle_task() {
+    unsafe { asm!(".align 12"); }
+
+    let mut i: u64 = 0;
+
+    // TODO: needs to do `wfi` not to busy loop
     loop {
-        let message = b"[1] this the userspace program\n";
-        let message_ptr = message as *const u8;
-        let message_len = message.len();
+        i += 1;
 
-        let ret: isize;
-
-        unsafe {
-            asm!(
-                "li a0, 1",
-                "ecall",
-                in("a7") SYSCALL_WRITE,
-                in("a1") message_ptr,
-                in("a2") message_len,
-                lateout("a0") ret,
-                options(nostack),
-            )
-        }
-
-        if ret != -1 {
-            let message = b"[1] written to the kernel, cool\n";
-            let message_ptr = message as *const u8;
-            let message_len = message.len();
-
-            unsafe {
-                asm!(
-                    "li a0, 1",
-                    "ecall",
-                    in("a7") SYSCALL_WRITE,
-                    in("a1") message_ptr,
-                    in("a2") message_len,
-                    options(nostack),
-                )
-            }
+        if i % 3_000_000_000 == 0 {
+            userspace::write("idle task spinning");
         }
     }
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn user_proc_2() -> ! {
-    unsafe { asm!(".align 12") };
-
-    loop {
-        let message = b"[2] this the userspace program\n";
-        let message_ptr = message as *const u8;
-        let message_len = message.len();
-
-        let ret: isize;
-
-        unsafe {
-            asm!(
-                "li a0, 1",
-                "ecall",
-                in("a7") SYSCALL_WRITE,
-                in("a1") message_ptr,
-                in("a2") message_len,
-                lateout("a0") ret,
-                options(nostack),
-            )
-        }
-
-        if ret != -1 {
-            let message = b"[2] written to the kernel, cool\n";
-            let message_ptr = message as *const u8;
-            let message_len = message.len();
-
-            unsafe {
-                asm!(
-                    "li a0, 1",
-                    "ecall",
-                    in("a7") SYSCALL_WRITE,
-                    in("a1") message_ptr,
-                    in("a2") message_len,
-                    options(nostack),
-                )
-            }
-        }
-    }
-}
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     loop {

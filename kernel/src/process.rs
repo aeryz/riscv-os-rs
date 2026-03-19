@@ -25,7 +25,7 @@ pub struct Process {
     pub wake_up_at: u64,
 }
 
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 #[repr(C)]
 pub enum State {
     Sleeping,
