@@ -377,6 +377,7 @@ fn schedule(reset_timer: bool) {
                 unsafe {
                     (*tf).sepc = crate::process::PROC_TEXT_VA as usize;
                     (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
+                    (*tf).sstatus = riscv::registers::Sstatus::read().raw() as usize;
                 }
                 next_process.context.sp = tf as u64;
                 next_process.context.ra = trap_resume as *const () as u64;
