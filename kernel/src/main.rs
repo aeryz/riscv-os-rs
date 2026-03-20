@@ -378,7 +378,7 @@ pub extern "C" fn kinit_cont() -> ! {
     unsafe {
         KERNEL.create_kernel_process(idle_task as *const () as u64);
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
-        KERNEL.create_process(userspace::userspace_2 as *const () as u64);
+        KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
         // KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 

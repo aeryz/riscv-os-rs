@@ -206,7 +206,6 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             .assume_init_mut()
             .trap_frame = trap_frame as *mut TrapFrame;
     }
-    trap_frame.a0 = 0xffffffffffffffff; // -1
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
     match trap_frame.scause {
         // I = 1, C = 9 = supervisor external interrupt
@@ -301,7 +300,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     let current_process =
                         unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
 
-                    let ms_to_ticks = |ticks: u64| ticks * 10_000_000 / 1_000;
+                    let ms_to_ticks = |ms: u64| ms * 10_000_000 / 1_000;
 
                     current_process.state = process::State::Sleeping;
                     current_process.wake_up_at =
@@ -377,7 +376,11 @@ fn schedule(reset_timer: bool) {
                 unsafe {
                     (*tf).sepc = crate::process::PROC_TEXT_VA as usize;
                     (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
-                    (*tf).sstatus = riscv::registers::Sstatus::read().raw() as usize;
+                    (*tf).sstatus = riscv::registers::Sstatus::read()
+                        .enable_user_mode()
+                        .enable_supervisor_interrupts()
+                        .enable_user_page_access()
+                        .raw() as usize;
                 }
                 next_process.context.sp = tf as u64;
                 next_process.context.ra = trap_resume as *const () as u64;

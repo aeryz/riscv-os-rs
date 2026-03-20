@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{SYSCALL_READ, SYSCALL_WRITE};
+use crate::{SYSCALL_READ, SYSCALL_SLEEP_MS, SYSCALL_WRITE};
 
 pub fn write(data_ptr: *const u8, len: usize) -> isize {
     let ret: isize;
@@ -23,7 +23,7 @@ pub fn read(buf: *mut u8, count: usize) -> isize {
     let ret: isize;
     unsafe {
         asm!(
-            "li a0, 1",
+            "li a0, 0",
             "ecall",
             in("a7") SYSCALL_READ,
             in("a1") buf,
@@ -34,4 +34,15 @@ pub fn read(buf: *mut u8, count: usize) -> isize {
     }
 
     ret
+}
+
+pub fn sleep_ms(ms: usize) {
+    unsafe {
+        asm!(
+            "ecall",
+            in("a7") SYSCALL_SLEEP_MS,
+            in("a0") ms,
+            options(nostack)
+        )
+    }
 }
