@@ -68,7 +68,7 @@ pub static mut KERNEL: Kernel = Kernel {
     uart_wait_queue_len: 0,
 };
 
-pub static mut PROC_TABLE: [MaybeUninit<Process>; 2] = [const { MaybeUninit::uninit() }; 2];
+pub static mut PROC_TABLE: [MaybeUninit<Process>; 3] = [const { MaybeUninit::uninit() }; 3];
 
 pub const DEBUG_LEVEL: DebugLevel = {
     if let Some(debug_level) = option_env!("DEBUG_LEVEL") {
@@ -195,6 +195,31 @@ pub fn initialize_kernel() -> ! {
 }
 
 impl Kernel {
+    #[inline(never)]
+    pub fn create_kernel_process(&mut self, entry: u64) {
+        let kernel_stack = self.allocator.alloc().unwrap();
+        let kernel_stack_va =
+            VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+        let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+
+        let mut context = Context::empty();
+        context.ra = entry;
+        context.sp = kernel_sp_va.raw();
+        unsafe {
+            PROC_TABLE[self.n_procs].write(Process {
+                pid: self.n_procs,
+                kernel_sp: kernel_sp_va.raw(),
+                root_table_pa: 0,
+                trap_frame: core::ptr::null_mut(),
+                context,
+                ticks_at_started_running: 0,
+                state: State::Ready,
+                wake_up_at: 0
+            });
+        }
+        self.n_procs += 1;
+    }
+
     #[inline(never)]
     pub fn create_process(&mut self, entry: u64) {
         // we first initiate user's root page table
@@ -351,8 +376,9 @@ pub extern "C" fn kinit_cont() -> ! {
     // };
 
     unsafe {
-        KERNEL.create_process(idle_task as *const () as u64);
+        KERNEL.create_kernel_process(idle_task as *const () as u64);
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
+        KERNEL.create_process(userspace::userspace_2 as *const () as u64);
         // KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 
@@ -419,17 +445,13 @@ pub fn enter_usermode(
 #[unsafe(no_mangle)]
 #[inline(never)]
 extern "C" fn idle_task() {
-    unsafe { asm!(".align 12"); }
+    kdebug("idle task running in kernel mode");
 
-    let mut i: u64 = 0;
-
-    // TODO: needs to do `wfi` not to busy loop
     loop {
-        i += 1;
-
-        if i % 3_000_000_000 == 0 {
-            userspace::write("idle task spinning");
-        }
+        riscv::registers::Sstatus::read()
+            .enable_supervisor_interrupts()
+            .write();
+        unsafe { asm!("wfi"); }
     }
 }
 
