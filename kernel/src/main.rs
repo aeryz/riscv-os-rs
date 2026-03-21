@@ -11,21 +11,23 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{allocator::Allocator, context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress, process::State};
+use crate::{
+    context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress, process::State,
+};
 use crate::{helper::*, memory::virtual_address::VirtualAddress};
 use crate::{
     memory::page_table::{self, PageTable},
     process::Process,
 };
 
-const QEMU_TEST: *mut u32 = 0x0010_0000 as *mut u32;
+const QEMU_TEST: *mut u32 = (KERNEL_DIRECT_MAPPING_BASE + 0x0010_0000) as *mut u32;
 
-pub mod allocator;
 pub mod console;
 pub mod context;
 pub mod driver;
 pub mod helper;
 pub mod memory;
+pub mod mm;
 pub mod plic;
 pub mod process;
 pub mod trap;
@@ -43,6 +45,7 @@ const UART_PHYSICAL_ADDR: u64 = 0x10000000;
 const SYSCALL_WRITE: usize = 1;
 const SYSCALL_READ: usize = 2;
 const SYSCALL_SLEEP_MS: usize = 3;
+const SYSCALL_SHUTDOWN: usize = 4;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
@@ -59,7 +62,6 @@ unsafe extern "C" {
 }
 
 pub static mut KERNEL: Kernel = Kernel {
-    allocator: Allocator::new(),
     root_page_table: ptr::null_mut(),
     current_running_proc: 0,
     n_procs: 0,
@@ -85,7 +87,6 @@ pub const DEBUG_LEVEL: DebugLevel = {
 
 #[repr(C)]
 pub struct Kernel {
-    allocator: Allocator<4>,
     root_page_table: *mut PageTable,
     current_running_proc: usize,
     n_procs: usize,
@@ -143,10 +144,9 @@ pub fn kprint<T: AsRef<[u8]>>(b: T) {
 pub fn initialize_kernel() -> ! {
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
-    let mut allocator = Allocator::new();
-    allocator.set_start_addr(memory_start);
+    mm::init(memory_start);
 
-    let root_page_table: &mut PageTable = unsafe { &mut *allocator.alloc().unwrap().as_ptr_mut() };
+    let root_page_table: &mut PageTable = unsafe { &mut *mm::alloc().unwrap().as_ptr_mut() };
 
     *root_page_table = PageTable::empty();
     root_page_table.kvm_full_map();
@@ -162,17 +162,12 @@ pub fn initialize_kernel() -> ! {
     kdebug(u64_to_str(n_text_pages, &mut buf));
 
     for _ in 0..n_text_pages {
-        root_page_table.create_identity_mapped_page(
-            text_start,
-            &mut allocator,
-            page_table::Perm::Execute,
-        );
+        root_page_table.create_identity_mapped_page(text_start, page_table::Perm::Execute);
         text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
     }
     kdebug(b"kvm full mapped \n");
 
     unsafe {
-        KERNEL.allocator = allocator;
         KERNEL.root_page_table = root_page_table as *mut PageTable;
     }
 
@@ -197,7 +192,7 @@ pub fn initialize_kernel() -> ! {
 impl Kernel {
     #[inline(never)]
     pub fn create_kernel_process(&mut self, entry: u64) {
-        let kernel_stack = self.allocator.alloc().unwrap();
+        let kernel_stack = mm::alloc().unwrap();
         let kernel_stack_va =
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
@@ -214,7 +209,7 @@ impl Kernel {
                 context,
                 ticks_at_started_running: 0,
                 state: State::Ready,
-                wake_up_at: 0
+                wake_up_at: 0,
             });
         }
         self.n_procs += 1;
@@ -223,7 +218,7 @@ impl Kernel {
     #[inline(never)]
     pub fn create_process(&mut self, entry: u64) {
         // we first initiate user's root page table
-        let process_root_table_pa = self.allocator.alloc().unwrap();
+        let process_root_table_pa = mm::alloc().unwrap();
         let process_root_table_va =
             VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE)
                 .unwrap();
@@ -239,29 +234,27 @@ impl Kernel {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
                     PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000 * i),
-                    &mut self.allocator,
                     page_table::Perm::Execute,
                     true,
                 );
             }
         }
-            
+
         // 16K stack
         for i in 0..4 {
-            let user_stack = self.allocator.alloc().unwrap();
+            let user_stack = mm::alloc().unwrap();
 
             unsafe {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
                     user_stack,
-                    &mut self.allocator,
                     page_table::Perm::Write,
                     true,
                 )
             };
         }
 
-        let kernel_stack = self.allocator.alloc().unwrap();
+        let kernel_stack = mm::alloc().unwrap();
         let kernel_stack_va =
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
 
@@ -269,7 +262,6 @@ impl Kernel {
             (*process_root_table).map_user_memory(
                 kernel_stack_va,
                 kernel_stack,
-                &mut self.allocator,
                 page_table::Perm::Write,
                 false,
             )
@@ -289,7 +281,7 @@ impl Kernel {
                 context: Context::empty(),
                 ticks_at_started_running: 0,
                 state: State::Ready,
-                wake_up_at: 0
+                wake_up_at: 0,
             });
         }
 
@@ -334,7 +326,9 @@ pub fn enter_supervisor(entry: usize) -> ! {
     riscv::registers::Medeleg::empty().delegate_all().write();
 
     // Enable access to `rdtime` pseudo-instruction by the S-mode.
-    riscv::registers::Mcounteren::empty().enable_access_to_time().write();
+    riscv::registers::Mcounteren::empty()
+        .enable_access_to_time()
+        .write();
 
     // Enable the `stimecmp` register in S-mode.
     riscv::registers::Menvcfg::empty().enable_stimecmp().write();
@@ -369,7 +363,9 @@ pub extern "C" fn kinit_cont() -> ! {
     kdebug(u64_to_str_hex(kernel_addr, &mut buf));
 
     plic::plic_init_uart(0);
-    unsafe { UART.enable_interrupts(); }
+    unsafe {
+        UART.enable_interrupts();
+    }
 
     // unsafe {
     //     KERNEL.create_process(userspace::shell::shell as *const () as u64);
@@ -381,7 +377,6 @@ pub extern "C" fn kinit_cont() -> ! {
         KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
         // KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
-
 
     unsafe {
         KERNEL.current_running_proc = 1;
@@ -434,10 +429,13 @@ pub fn enter_usermode(
     fn ms_to_ticks(ms: u64) -> u64 {
         ms * TIMER_FREQ / 1000
     }
-    
+
     let time = riscv::registers::Time::read().raw();
     riscv::registers::Stimecmp::new(time + ms_to_ticks(8)).write();
-    riscv::registers::Sie::empty().enable_external_interrupts().enable_timer_interrupt().write();
+    riscv::registers::Sie::empty()
+        .enable_external_interrupts()
+        .enable_timer_interrupt()
+        .write();
 
     riscv::sret(user_stack);
 }
@@ -451,7 +449,9 @@ extern "C" fn idle_task() {
         riscv::registers::Sstatus::read()
             .enable_supervisor_interrupts()
             .write();
-        unsafe { asm!("wfi"); }
+        unsafe {
+            asm!("wfi");
+        }
     }
 }
 
@@ -462,7 +462,9 @@ fn panic(_info: &PanicInfo) -> ! {
     }
 }
 
-pub fn halt() {
+#[unsafe(no_mangle)]
+#[inline(never)]
+pub extern "C" fn halt() {
     unsafe {
         core::ptr::write_volatile(QEMU_TEST, 0x5555);
     }

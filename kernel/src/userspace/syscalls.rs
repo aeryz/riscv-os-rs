@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{SYSCALL_READ, SYSCALL_SLEEP_MS, SYSCALL_WRITE};
+use crate::{SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE};
 
 pub fn write(data_ptr: *const u8, len: usize) -> isize {
     let ret: isize;
@@ -42,6 +42,17 @@ pub fn sleep_ms(ms: usize) {
             "ecall",
             in("a7") SYSCALL_SLEEP_MS,
             in("a0") ms,
+            options(nostack)
+        )
+    }
+}
+
+// TODO: temporary syscall
+pub fn shutdown() {
+    unsafe {
+        asm!(
+            "ecall",
+            in("a7") SYSCALL_SHUTDOWN,
             options(nostack)
         )
     }

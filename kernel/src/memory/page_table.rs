@@ -1,8 +1,7 @@
 use crate::{
-    KERNEL_DIRECT_MAPPING_BASE,
-    allocator::Allocator,
-    kdebug,
+    KERNEL_DIRECT_MAPPING_BASE, kdebug,
     memory::{page_table_entry::PageTableEntry, virtual_address::VirtualAddress},
+    mm,
 };
 
 use super::physical_address::PhysicalAddress;
@@ -56,12 +55,7 @@ impl PageTable {
         });
     }
 
-    pub fn create_identity_mapped_page<const N: usize>(
-        &mut self,
-        addr: PhysicalAddress,
-        allocator: &mut Allocator<N>,
-        perm: Perm,
-    ) {
+    pub fn create_identity_mapped_page(&mut self, addr: PhysicalAddress, perm: Perm) {
         let mut buf = [0; 20];
         kdebug(b"entered identity map\n".as_slice());
 
@@ -76,7 +70,7 @@ impl PageTable {
 
         let l2_entry = &mut self.0[va.vpn_2()];
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
-            let pa = allocator.alloc().unwrap();
+            let pa = mm::alloc().unwrap();
             let page_table_ptr = pa.as_ptr_mut();
             unsafe {
                 *page_table_ptr = PageTable::empty();
@@ -89,7 +83,7 @@ impl PageTable {
 
         let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(va.vpn_1()) };
         let l0_page_table: *mut PageTable = if !l1_entry.is_valid() {
-            let pa = allocator.alloc().unwrap();
+            let pa = mm::alloc().unwrap();
             let page_table_ptr = pa.as_ptr_mut();
             unsafe {
                 *page_table_ptr = PageTable::empty();
@@ -115,17 +109,16 @@ impl PageTable {
         }
     }
 
-    pub fn map_user_memory<const N: usize>(
+    pub fn map_user_memory(
         &mut self,
         va: VirtualAddress,
         pa: PhysicalAddress,
-        allocator: &mut Allocator<N>,
         perm: Perm,
         is_user: bool,
     ) {
         let l2_entry = &mut self.0[va.vpn_2()];
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
-            let pa = allocator.alloc().unwrap();
+            let pa = mm::alloc().unwrap();
             let va = VirtualAddress::from_raw(pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
             let page_table_ptr = va.as_ptr_mut();
             unsafe {
@@ -139,7 +132,7 @@ impl PageTable {
 
         let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(va.vpn_1()) };
         let l0_page_table: *mut PageTable = if !l1_entry.is_valid() {
-            let pa = allocator.alloc().unwrap();
+            let pa = mm::alloc().unwrap();
             let va = VirtualAddress::from_raw(pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
             let page_table_ptr = va.as_ptr_mut();
             unsafe {

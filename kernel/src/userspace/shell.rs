@@ -2,10 +2,10 @@ use core::arch::asm;
 
 use crate::userspace::syscalls;
 
-const BINS: &[&[u8]] = &[CMD_HELP];
 const PROMPT: &[u8] = b"shell $ ";
 
 const CMD_HELP: &[u8] = b"help";
+const CMD_SHUTDOWN: &[u8] = b"shutdown";
 
 #[unsafe(no_mangle)]
 pub extern "C" fn shell() {
@@ -43,24 +43,39 @@ pub extern "C" fn shell() {
             }
         }
 
-        if let Some(binary) = BINS.iter().find(|bin| **bin == &buf[0..pos]) {
+        match &buf[0..pos] {
+            CMD_HELP => {
+                let cmds = "available commands:\n";
+                super::write(cmds);
+                [CMD_SHUTDOWN, CMD_HELP].iter().for_each(|b| {
+                    super::write("- ");
+                    super::write(b);
+                    super::write("\n");
+                })
+            }
+            CMD_SHUTDOWN => {
+                syscalls::shutdown();
+            }
+            binary => {
+                let msg = "shell: command not found: ";
+                super::write(msg);
+                super::write(binary);
+                super::write(b"\n");
+            }
+        }
+
+        if let Some(binary) = [CMD_SHUTDOWN, CMD_HELP]
+            .iter()
+            .find(|bin| **bin == &buf[0..pos])
+        {
             match *binary {
-                CMD_HELP => {
-                    let cmds = "available commands:\n";
-                    super::write(cmds);
-                    BINS.iter().for_each(|b| {
-                        super::write("- ");
-                        super::write(b);
-                        super::write("\n");
-                    })
-                }
+                CMD_HELP => {}
+                // CMD_SHUTDOWN => {
+                //     syscalls::shutdown();
+                // }
                 _ => {}
             }
         } else {
-            let msg = "shell: command not found: ";
-            super::write(msg);
-            super::write(&buf[0..pos]);
-            super::write(b"\n");
         }
     }
 }

@@ -1,7 +1,7 @@
 use core::arch::global_asm;
 
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SLEEP_MS, SYSCALL_WRITE, console,
+    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE, console,
     context::Context,
     helper::{u64_to_str, u64_to_str_hex},
     kdebug, ktrace, plic, process,
@@ -307,6 +307,9 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                         riscv::registers::Time::read().raw() + ms_to_ticks(ms);
 
                     schedule(false);
+                }
+                SYSCALL_SHUTDOWN => {
+                    crate::halt();
                 }
                 _ => unreachable!(),
             }
