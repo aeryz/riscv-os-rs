@@ -41,8 +41,6 @@ const SYSCALL_SLEEP_MS: usize = 3;
 const SYSCALL_SHUTDOWN: usize = 4;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
-const KERNEL_VA_BASE: u64 = 0xffff_ffff_8020_0000;
-const KERNEL_PA_BASE: u64 = 0x8020_0000;
 
 pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
 pub static mut UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
@@ -132,7 +130,6 @@ pub fn initialize_kernel() -> ! {
     unsafe {
         asm!(
         "li t0, {kernel_offset}",
-        "add sp, sp, t0",
         "add t0, t0, {}",
         "jr t0",
         in(reg) kinit_cont as *const () as u64,

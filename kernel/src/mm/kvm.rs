@@ -1,9 +1,6 @@
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{
-    kdebug,
-    mm::{self, PageTable, PageTableEntry, PhysicalAddress, allocator},
-};
+use crate::mm::{self, PageTable, PageTableEntry, PhysicalAddress, allocator};
 
 static mut KERNEL_ROOT_PAGE_TABLE: PageTable = PageTable::empty();
 
@@ -17,8 +14,6 @@ unsafe extern "C" {
 pub fn init() {
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
-    crate::kdebug("memstart:");
-    crate::kdebug(crate::u64_to_str_hex(memory_start.raw(), &mut [0; 20]));
     allocator::init(memory_start);
 
     let text_end = unsafe { &__text_end as *const u8 as u64 };
@@ -33,16 +28,19 @@ pub fn init() {
         }
     }
 
-    kdebug("before satp");
-    kdebug(crate::u64_to_str_hex(
-        unsafe { &KERNEL_ROOT_PAGE_TABLE } as *const PageTable as u64,
-        &mut [0; 20],
-    ));
     riscv::write_satp(
         Satp::empty()
             .set_mode(SatpMode::Sv39)
             .set_ppn((unsafe { &KERNEL_ROOT_PAGE_TABLE }) as *const PageTable as u64),
     );
+    unsafe {
+        core::arch::asm!(
+            "li t0, {kernel_offset}",
+            "add sp, sp, t0",
+            kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()),
+            options(nostack, preserves_flags),
+        );
+    }
 }
 
 // TODO: make this dynamic
