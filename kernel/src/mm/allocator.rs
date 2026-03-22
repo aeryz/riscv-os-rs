@@ -1,6 +1,6 @@
 use core::cell::OnceCell;
 
-use crate::memory::physical_address::PhysicalAddress;
+use crate::mm::PhysicalAddress;
 
 static mut ALLOCATOR: OnceCell<Allocator<16>> = OnceCell::new();
 
@@ -8,7 +8,7 @@ static mut ALLOCATOR: OnceCell<Allocator<16>> = OnceCell::new();
 
 /// Initialize the allocator with the given `start_addr`.
 /// This will only `init` once even if it is called multiple times.
-pub fn init(start_addr: PhysicalAddress) {
+pub(super) fn init(start_addr: PhysicalAddress) {
     unsafe {
         let _ = ALLOCATOR.get_or_init(|| Allocator::new(start_addr));
     }

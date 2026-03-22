@@ -1,15 +1,12 @@
 use crate::{
-    KERNEL_DIRECT_MAPPING_BASE, kdebug,
-    memory::{page_table_entry::PageTableEntry, virtual_address::VirtualAddress},
-    mm,
+    kdebug,
+    mm::{self, PageTableEntry, VirtualAddress},
 };
 
-use super::physical_address::PhysicalAddress;
+use super::PhysicalAddress;
 
+#[repr(C, align(4096))]
 pub struct PageTable([PageTableEntry; 512]);
-
-pub const KERNEL_IMAGE_START: u64 = 0xffff_ffff_8000_0000;
-pub const KERNEL_PA_BASE: u64 = 0x8000_0000;
 
 pub enum Perm {
     Read,
@@ -19,40 +16,12 @@ pub enum Perm {
 }
 
 impl PageTable {
-    pub fn empty() -> Self {
+    pub const fn empty() -> Self {
         PageTable([PageTableEntry::empty(); 512])
     }
 
-    // TODO: make this dynamic
-    /// Maps the ~254 GB of ram
-    pub fn kvm_full_map(&mut self) {
-        let va = VirtualAddress::from_raw(KERNEL_DIRECT_MAPPING_BASE).unwrap();
-        const GB: u64 = 1024 * 1024 * 1024;
-        self.0[va.vpn_2()..510]
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, pte)| {
-                let pa = unsafe { PhysicalAddress::from_raw_unchecked(i as u64 * GB) };
-                *pte = pte
-                    .set_valid()
-                    .set_writable()
-                    .set_accessed()
-                    .set_dirty()
-                    .set_physical_address(pa);
-            });
-
-        // kernel image
-        // TODO: for convenience, will just have 2 1GB RWX tables
-        self.0[510..].iter_mut().enumerate().for_each(|(i, pte)| {
-            let pa = unsafe { PhysicalAddress::from_raw_unchecked(KERNEL_PA_BASE + i as u64 * GB) };
-            *pte = pte
-                .set_valid()
-                .set_writable()
-                .set_executable()
-                .set_accessed()
-                .set_dirty()
-                .set_physical_address(pa);
-        });
+    pub const fn set_entry(&mut self, idx: usize, entry: PageTableEntry) {
+        self.0[idx] = entry;
     }
 
     pub fn create_identity_mapped_page(&mut self, addr: PhysicalAddress, perm: Perm) {
@@ -72,6 +41,8 @@ impl PageTable {
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
             let pa = mm::alloc().unwrap();
             let page_table_ptr = pa.as_ptr_mut();
+            kdebug("ptr:");
+            kdebug(crate::u64_to_str_hex(page_table_ptr as u64, &mut [0; 20]));
             unsafe {
                 *page_table_ptr = PageTable::empty();
             }
@@ -119,7 +90,8 @@ impl PageTable {
         let l2_entry = &mut self.0[va.vpn_2()];
         let l1_page_table: *mut PageTable = if !l2_entry.is_valid() {
             let pa = mm::alloc().unwrap();
-            let va = VirtualAddress::from_raw(pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+            let va =
+                VirtualAddress::from_raw(pa.raw() + mm::KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
             let page_table_ptr = va.as_ptr_mut();
             unsafe {
                 *page_table_ptr = PageTable::empty();
@@ -127,13 +99,15 @@ impl PageTable {
             *l2_entry = PageTableEntry::new_pointer().set_physical_address(pa);
             page_table_ptr
         } else {
-            (l2_entry.physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE) as *mut PageTable
+            (l2_entry.physical_address().raw() + mm::KERNEL_DIRECT_MAPPING_BASE.raw())
+                as *mut PageTable
         };
 
         let l1_entry = unsafe { (*l1_page_table).0.get_unchecked_mut(va.vpn_1()) };
         let l0_page_table: *mut PageTable = if !l1_entry.is_valid() {
             let pa = mm::alloc().unwrap();
-            let va = VirtualAddress::from_raw(pa.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
+            let va =
+                VirtualAddress::from_raw(pa.raw() + mm::KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
             let page_table_ptr = va.as_ptr_mut();
             unsafe {
                 *page_table_ptr = PageTable::empty();
@@ -141,7 +115,8 @@ impl PageTable {
             *l1_entry = PageTableEntry::new_pointer().set_physical_address(pa);
             page_table_ptr
         } else {
-            (l1_entry.physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE) as *mut PageTable
+            (l1_entry.physical_address().raw() + mm::KERNEL_DIRECT_MAPPING_BASE.raw())
+                as *mut PageTable
         };
 
         let l0_entry = unsafe { (*l0_page_table).0.get_unchecked_mut(va.vpn_0()) };

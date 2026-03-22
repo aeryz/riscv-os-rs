@@ -1,4 +1,4 @@
-use crate::memory::physical_address::PhysicalAddress;
+use crate::mm::PhysicalAddress;
 
 /// Sv39 Page Table Entry (PTE) Layout
 ///

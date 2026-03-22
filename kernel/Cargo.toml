@@ -9,3 +9,7 @@ riscv = { workspace = true }
 
 [build-dependencies]
 cc = "1"
+
+[features]
+default = [ "sv39" ]
+sv39 = []

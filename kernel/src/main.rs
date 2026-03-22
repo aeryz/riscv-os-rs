@@ -6,19 +6,13 @@ use core::{
     arch::{asm, global_asm},
     mem::MaybeUninit,
     panic::PanicInfo,
-    ptr,
 };
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{
-    context::Context, driver::uart::Uart, memory::physical_address::PhysicalAddress, process::State,
-};
-use crate::{helper::*, memory::virtual_address::VirtualAddress};
-use crate::{
-    memory::page_table::{self, PageTable},
-    process::Process,
-};
+use crate::{context::Context, driver::uart::Uart, mm::PhysicalAddress, process::State};
+use crate::{helper::*, mm::VirtualAddress};
+use crate::{mm::PageTable, process::Process};
 
 const QEMU_TEST: *mut u32 = (KERNEL_DIRECT_MAPPING_BASE + 0x0010_0000) as *mut u32;
 
@@ -26,7 +20,6 @@ pub mod console;
 pub mod context;
 pub mod driver;
 pub mod helper;
-pub mod memory;
 pub mod mm;
 pub mod plic;
 pub mod process;
@@ -55,14 +48,7 @@ pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
 pub static mut UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
 pub static mut SCHEDULER_CTX: MaybeUninit<Context> = MaybeUninit::zeroed();
 
-unsafe extern "C" {
-    static __text_start: u8;
-    static __text_end: u8;
-    static __kernel_end: u8;
-}
-
 pub static mut KERNEL: Kernel = Kernel {
-    root_page_table: ptr::null_mut(),
     current_running_proc: 0,
     n_procs: 0,
     // TODO: temporary queue to store the processes that are blocked by the uart
@@ -87,7 +73,6 @@ pub const DEBUG_LEVEL: DebugLevel = {
 
 #[repr(C)]
 pub struct Kernel {
-    root_page_table: *mut PageTable,
     current_running_proc: usize,
     n_procs: usize,
     uart_wait_queue: [usize; 16],
@@ -142,40 +127,7 @@ pub fn kprint<T: AsRef<[u8]>>(b: T) {
 
 #[inline(never)]
 pub fn initialize_kernel() -> ! {
-    let memory_start =
-        unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
-    mm::init(memory_start);
-
-    let root_page_table: &mut PageTable = unsafe { &mut *mm::alloc().unwrap().as_ptr_mut() };
-
-    *root_page_table = PageTable::empty();
-    root_page_table.kvm_full_map();
-
-    let text_end = unsafe { &__text_end as *const u8 as u64 };
-    let mut text_start =
-        unsafe { PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as u64) };
-
-    let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
-
-    kdebug(b"the text page count is: ");
-    let mut buf = [0; 20];
-    kdebug(u64_to_str(n_text_pages, &mut buf));
-
-    for _ in 0..n_text_pages {
-        root_page_table.create_identity_mapped_page(text_start, page_table::Perm::Execute);
-        text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 4096) };
-    }
-    kdebug(b"kvm full mapped \n");
-
-    unsafe {
-        KERNEL.root_page_table = root_page_table as *mut PageTable;
-    }
-
-    riscv::write_satp(
-        Satp::empty()
-            .set_mode(SatpMode::Sv39)
-            .set_ppn(root_page_table as *mut PageTable as u64),
-    );
+    mm::init();
 
     unsafe {
         asm!(
@@ -184,7 +136,7 @@ pub fn initialize_kernel() -> ! {
         "add t0, t0, {}",
         "jr t0",
         in(reg) kinit_cont as *const () as u64,
-        kernel_offset = const (KERNEL_VA_BASE - KERNEL_PA_BASE), 
+        kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()), 
         options(noreturn, nostack, preserves_flags))
     }
 }
@@ -234,7 +186,7 @@ impl Kernel {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
                     PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000 * i),
-                    page_table::Perm::Execute,
+                    mm::Perm::Execute,
                     true,
                 );
             }
@@ -248,7 +200,7 @@ impl Kernel {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
                     user_stack,
-                    page_table::Perm::Write,
+                    mm::Perm::Write,
                     true,
                 )
             };
@@ -262,14 +214,12 @@ impl Kernel {
             (*process_root_table).map_user_memory(
                 kernel_stack_va,
                 kernel_stack,
-                page_table::Perm::Write,
+                mm::Perm::Write,
                 false,
             )
         };
 
-        unsafe {
-            (*process_root_table).kvm_full_map();
-        }
+        mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
         unsafe {

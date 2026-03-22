@@ -20,6 +20,17 @@ impl VirtualAddress {
     const MASK: u64 = 0b111111111;
 
     #[must_use]
+    pub const unsafe fn from_raw_unchecked(addr: u64) -> Self {
+        debug_assert!({
+            let sign = (addr >> (Self::BITS - 1)) & 1;
+            let upper = addr >> Self::BITS;
+            (sign == 0 && upper == 0) || (sign == 1 && upper == (1 << 25) - 1)
+        });
+
+        VirtualAddress(addr)
+    }
+
+    #[must_use]
     pub fn from_raw(addr: u64) -> Result<Self, ()> {
         let sign = (addr >> (Self::BITS - 1)) & 1;
         let upper = addr >> Self::BITS;
