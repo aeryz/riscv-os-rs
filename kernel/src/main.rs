@@ -168,7 +168,7 @@ impl Kernel {
         // Assuming the code is at most 32K
         for i in 0..8 {
             unsafe {
-                (*process_root_table).map_user_memory(
+                (*process_root_table).map_vm(
                     VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
                     PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000 * i),
                     PteFlags::RX | PteFlags::U,
@@ -181,7 +181,7 @@ impl Kernel {
             let user_stack = mm::alloc().unwrap();
 
             unsafe {
-                (*process_root_table).map_user_memory(
+                (*process_root_table).map_vm(
                     VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
                     user_stack,
                     PteFlags::RW | PteFlags::U,
@@ -193,9 +193,7 @@ impl Kernel {
         let kernel_stack_va =
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
 
-        unsafe {
-            (*process_root_table).map_user_memory(kernel_stack_va, kernel_stack, PteFlags::RW)
-        };
+        unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
 
         mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
