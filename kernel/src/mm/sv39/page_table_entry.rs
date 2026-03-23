@@ -1,4 +1,24 @@
 use crate::mm::PhysicalAddress;
+use bitflags::bitflags;
+
+bitflags! {
+    pub struct PteFlags: u64 {
+        const V = 1 << 0;
+        const R = 1 << 1;
+        const W = 1 << 2;
+        const X = 1 << 3;
+        const U = 1 << 4;
+        const G = 1 << 5;
+        const A = 1 << 6;
+        const D = 1 << 7;
+        /// Readable + Writable
+        const RW = (1 << 2) | (1 << 1);
+        /// Readable + Executable
+        const RX = (1 << 3) | (1 << 1);
+        /// Readable + Executable
+        const RWX = (1 << 1) | (1 << 2) | (1 << 3);
+    }
+}
 
 /// Sv39 Page Table Entry (PTE) Layout
 ///
@@ -15,15 +35,6 @@ use crate::mm::PhysicalAddress;
 pub struct PageTableEntry(u64);
 
 impl PageTableEntry {
-    const FLAG_V: u64 = 1;
-    const FLAG_R: u64 = 1 << 1;
-    const FLAG_W: u64 = 1 << 2;
-    const FLAG_X: u64 = 1 << 3;
-    const FLAG_U: u64 = 1 << 4;
-    const FLAG_G: u64 = 1 << 5;
-    const FLAG_A: u64 = 1 << 6;
-    const FLAG_D: u64 = 1 << 7;
-
     // const MASK_PPN_0: u64 = 0x1ff << Self::OFFSET_PPN_0;
     // const MASK_PPN_1: u64 = 0x1ff << Self::OFFSET_PPN_1;
     // const MASK_PPN_2: u64 = 0x3ffffff << Self::OFFSET_PPN_2;
@@ -36,8 +47,8 @@ impl PageTableEntry {
 
     /// Returns a non-leaf valid PTE.
     #[must_use]
-    pub fn new_pointer() -> Self {
-        Self::empty().set_valid()
+    pub fn new_valid() -> Self {
+        Self::empty().set_flags(PteFlags::V)
     }
 
     #[must_use]
@@ -51,60 +62,12 @@ impl PageTableEntry {
 
     #[must_use]
     pub const fn is_valid(&self) -> bool {
-        self.0 & Self::FLAG_V == 1
+        self.0 & PteFlags::V.bits() == 1
     }
 
     #[must_use]
-    pub fn set_valid(mut self) -> Self {
-        self.0 |= Self::FLAG_V;
-        self
-    }
-
-    #[must_use]
-    pub fn set_readable(mut self) -> Self {
-        self.0 |= Self::FLAG_R;
-        self
-    }
-
-    #[must_use]
-    pub fn set_writable(mut self) -> Self {
-        self.0 |= Self::FLAG_W | Self::FLAG_R;
-        self
-    }
-
-    #[must_use]
-    pub fn set_executable(mut self) -> Self {
-        self.0 |= Self::FLAG_X | Self::FLAG_R;
-        self
-    }
-
-    #[must_use]
-    pub fn set_rwx(mut self) -> Self {
-        self.0 |= Self::FLAG_R | Self::FLAG_W | Self::FLAG_X;
-        self
-    }
-
-    #[must_use]
-    pub fn set_user_accessible(mut self) -> Self {
-        self.0 |= Self::FLAG_U;
-        self
-    }
-
-    #[must_use]
-    pub fn set_global_mapping(mut self) -> Self {
-        self.0 |= Self::FLAG_G;
-        self
-    }
-
-    #[must_use]
-    pub fn set_accessed(mut self) -> Self {
-        self.0 |= Self::FLAG_A;
-        self
-    }
-
-    #[must_use]
-    pub fn set_dirty(mut self) -> Self {
-        self.0 |= Self::FLAG_D;
+    pub fn set_flags(mut self, flag: PteFlags) -> Self {
+        self.0 |= flag.bits();
         self
     }
 

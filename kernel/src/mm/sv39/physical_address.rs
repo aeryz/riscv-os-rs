@@ -75,7 +75,7 @@ impl PhysicalAddress {
     /// Returns error if PA > VA::MAX since in that case, the VA cannot be
     /// identity mapped.
     #[must_use]
-    pub fn to_identity_mapped_va(self) -> Result<VirtualAddress, ()> {
+    pub fn to_identical_va(self) -> Result<VirtualAddress, ()> {
         VirtualAddress::from_raw(self.0)
     }
 }

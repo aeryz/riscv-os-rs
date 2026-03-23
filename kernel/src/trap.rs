@@ -314,7 +314,9 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 _ => unreachable!(),
             }
         }
-        _ => {
+        trap => {
+            crate::kdebug("unhandled trap");
+            crate::kdebug(crate::u64_to_str(trap as u64, &mut [0; 20]));
             unreachable!()
         }
     }

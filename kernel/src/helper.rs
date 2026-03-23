@@ -1,3 +1,7 @@
+pub const KB: usize = 1 << 10;
+pub const MB: usize = 1 << 20;
+pub const GB: usize = 1 << 30;
+
 pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
     if buf.is_empty() {
         return b"";

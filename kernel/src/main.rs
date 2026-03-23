@@ -12,7 +12,10 @@ use riscv::registers::{Satp, SatpMode};
 
 use crate::{context::Context, driver::uart::Uart, mm::PhysicalAddress, process::State};
 use crate::{helper::*, mm::VirtualAddress};
-use crate::{mm::PageTable, process::Process};
+use crate::{
+    mm::{PageTable, PteFlags},
+    process::Process,
+};
 
 const QEMU_TEST: *mut u32 = (KERNEL_DIRECT_MAPPING_BASE + 0x0010_0000) as *mut u32;
 
@@ -168,8 +171,7 @@ impl Kernel {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
                     PhysicalAddress::from_raw_unchecked(entry - 0xffff_ffff_0000_0000 + 0x1000 * i),
-                    mm::Perm::Execute,
-                    true,
+                    PteFlags::RX | PteFlags::U,
                 );
             }
         }
@@ -182,8 +184,7 @@ impl Kernel {
                 (*process_root_table).map_user_memory(
                     VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
                     user_stack,
-                    mm::Perm::Write,
-                    true,
+                    PteFlags::RW | PteFlags::U,
                 )
             };
         }
@@ -193,12 +194,7 @@ impl Kernel {
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
 
         unsafe {
-            (*process_root_table).map_user_memory(
-                kernel_stack_va,
-                kernel_stack,
-                mm::Perm::Write,
-                false,
-            )
+            (*process_root_table).map_user_memory(kernel_stack_va, kernel_stack, PteFlags::RW)
         };
 
         mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
@@ -401,6 +397,18 @@ extern "C" fn idle_task() {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
+    kprint("panicked\n");
+    match _info.location() {
+        Some(loc) => {
+            kprint("File: ");
+            kprint(loc.file());
+            kprint("\nLine: ");
+            kprint(u64_to_str(loc.line() as u64, &mut [0; 20]));
+            kprint("Column: ");
+            kprint(u64_to_str(loc.column() as u64, &mut [0; 20]));
+        }
+        None => {}
+    }
     halt()
 }
 

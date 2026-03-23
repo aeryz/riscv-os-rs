@@ -28,3 +28,15 @@ pub fn sret(user_sp: u64) -> ! {
 pub fn mret() -> ! {
     unsafe { asm!("mret", options(noreturn, nostack, preserves_flags)) }
 }
+
+#[inline(always)]
+pub fn const_add_to_sp<const N: usize>() {
+    unsafe {
+        core::arch::asm!(
+            "li t0, {kernel_offset}",
+            "add sp, sp, t0",
+            kernel_offset = const N,
+            options(nostack, preserves_flags),
+        );
+    }
+}
