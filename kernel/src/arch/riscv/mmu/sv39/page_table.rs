@@ -1,4 +1,5 @@
-use crate::mm::{self, PageTableEntry, PteFlags, VirtualAddress};
+use crate::arch::mmu::{PageTableEntry, PteFlags, VirtualAddress};
+use crate::mm::{KERNEL_DIRECT_MAPPING_BASE, alloc};
 
 use super::PhysicalAddress;
 
@@ -25,7 +26,7 @@ impl PageTable {
     ///
     /// This should be used after the virtual memory is enabled and the kvm mappings are done.
     pub fn map_vm(&mut self, va: VirtualAddress, pa: PhysicalAddress, flags: PteFlags) {
-        self.map_memory_with_base(va, pa, flags, mm::KERNEL_DIRECT_MAPPING_BASE.raw() as usize);
+        self.map_memory_with_base(va, pa, flags, KERNEL_DIRECT_MAPPING_BASE.raw() as usize);
     }
 
     fn map_memory_with_base(
@@ -55,7 +56,7 @@ impl PageTable {
             return (pte.physical_address().raw() + base as u64) as *mut PageTable;
         }
 
-        let pa = mm::alloc().unwrap();
+        let pa = alloc().unwrap();
         let va = VirtualAddress::from_raw(pa.raw() + base as u64).unwrap();
         let page_table_ptr = va.as_ptr_mut();
         unsafe {

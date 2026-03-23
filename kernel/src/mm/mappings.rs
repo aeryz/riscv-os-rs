@@ -1,4 +1,4 @@
-use crate::mm::{PhysicalAddress, VirtualAddress};
+use crate::arch::mmu::{PhysicalAddress, VirtualAddress};
 
 pub const KERNEL_IMAGE_START_VA: VirtualAddress =
     unsafe { VirtualAddress::from_raw_unchecked(0xffff_ffff_8000_0000) };

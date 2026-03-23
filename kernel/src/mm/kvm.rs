@@ -1,8 +1,9 @@
 use riscv::registers::{Satp, SatpMode};
 
 use crate::{
+    arch::mmu::{PageTable, PageTableEntry, PhysicalAddress, PteFlags},
     helper::GB,
-    mm::{self, PageTable, PageTableEntry, PhysicalAddress, PteFlags, allocator},
+    mm::{self, allocator},
 };
 
 // TODO(aeryz): add spinlock:

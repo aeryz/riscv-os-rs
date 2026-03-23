@@ -1,6 +1,6 @@
 use core::cell::OnceCell;
 
-use crate::mm::PhysicalAddress;
+use crate::arch::mmu::PhysicalAddress;
 
 static mut ALLOCATOR: OnceCell<Allocator<16>> = OnceCell::new();
 

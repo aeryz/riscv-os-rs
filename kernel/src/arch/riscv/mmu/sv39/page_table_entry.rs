@@ -1,4 +1,4 @@
-use crate::mm::PhysicalAddress;
+use crate::arch::mmu::PhysicalAddress;
 use bitflags::bitflags;
 
 bitflags! {

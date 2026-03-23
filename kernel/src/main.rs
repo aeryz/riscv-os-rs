@@ -10,10 +10,9 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{arch::Context, driver::uart::Uart, mm::PhysicalAddress};
-use crate::{helper::*, mm::VirtualAddress};
+use crate::{arch::Context, arch::mmu::{PhysicalAddress, PageTable, PteFlags, VirtualAddress}, driver::uart::Uart};
+use crate::helper::*;
 use crate::{
-    mm::{PageTable, PteFlags},
     task::{Process, ProcessState},
 };
 

@@ -1,4 +1,4 @@
-use crate::mm::VirtualAddress;
+use crate::arch::mmu::VirtualAddress;
 
 /// Physical address
 ///

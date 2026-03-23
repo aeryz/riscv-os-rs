@@ -1,7 +1,4 @@
-use crate::{
-    arch::{Context, TrapFrame},
-    mm::VirtualAddress,
-};
+use crate::arch::{Context, TrapFrame, mmu::VirtualAddress};
 
 pub const PROCESS_TEXT_ADDRESS: VirtualAddress =
     unsafe { VirtualAddress::from_raw_unchecked(0x1_0000) };
