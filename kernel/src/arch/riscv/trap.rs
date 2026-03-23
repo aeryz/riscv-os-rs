@@ -2,17 +2,14 @@ use core::arch::global_asm;
 
 use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
-    arch::Context,
-    console,
-    helper::{u64_to_str, u64_to_str_hex},
-    kdebug, ktrace, plic,
+    arch::Context, console, ktrace, plic, task,
 };
 
 unsafe extern "C" {
     #[allow(unused)]
-    fn swtch(from: *mut Context, to: *const Context);
+    pub fn swtch(from: *mut Context, to: *const Context);
 
-    fn trap_resume();
+    pub fn trap_resume();
 }
 
 // The trampoline to save the trap frame and jump to the high level trap handler.
@@ -154,41 +151,41 @@ ret_userspace:
 #[repr(C)]
 #[derive(Clone, Default)]
 pub struct TrapFrame {
-    ra: usize,
-    sp: usize,
-    gp: usize,
-    tp: usize,
-    t0: usize,
-    t1: usize,
-    t2: usize,
-    s0: usize,
-    s1: usize,
-    a0: usize,
-    a1: usize,
-    a2: usize,
-    a3: usize,
-    a4: usize,
-    a5: usize,
-    a6: usize,
-    a7: usize,
-    s2: usize,
-    s3: usize,
-    s4: usize,
-    s5: usize,
-    s6: usize,
-    s7: usize,
-    s8: usize,
-    s9: usize,
-    s10: usize,
-    s11: usize,
-    t3: usize,
-    t4: usize,
-    t5: usize,
-    t6: usize,
+    pub ra: usize,
+    pub sp: usize,
+    pub gp: usize,
+    pub tp: usize,
+    pub t0: usize,
+    pub t1: usize,
+    pub t2: usize,
+    pub s0: usize,
+    pub s1: usize,
+    pub a0: usize,
+    pub a1: usize,
+    pub a2: usize,
+    pub a3: usize,
+    pub a4: usize,
+    pub a5: usize,
+    pub a6: usize,
+    pub a7: usize,
+    pub s2: usize,
+    pub s3: usize,
+    pub s4: usize,
+    pub s5: usize,
+    pub s6: usize,
+    pub s7: usize,
+    pub s8: usize,
+    pub s9: usize,
+    pub s10: usize,
+    pub s11: usize,
+    pub t3: usize,
+    pub t4: usize,
+    pub t5: usize,
+    pub t6: usize,
 
-    sepc: usize,
-    scause: usize,
-    sstatus: usize,
+    pub sepc: usize,
+    pub scause: usize,
+    pub sstatus: usize,
 }
 
 impl TrapFrame {
@@ -263,7 +260,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                         .assume_init_mut()
                         .state = crate::task::ProcessState::Ready;
                 }
-                schedule(true);
+                task::schedule(true);
             } else {
                 // 4ms
                 riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + current_ticks).write();
@@ -309,7 +306,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     current_process.wake_up_at =
                         riscv::registers::Time::read().raw() + ms_to_ticks(ms);
 
-                    schedule(false);
+                    task::schedule(false);
                 }
                 SYSCALL_SHUTDOWN => {
                     crate::halt();
@@ -322,127 +319,6 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             crate::kdebug(crate::u64_to_str(trap as u64, &mut [0; 20]));
             unreachable!()
         }
-    }
-}
-
-fn find_next_available_proc_id(mut current_proc_id: usize) -> Option<usize> {
-    let time = riscv::registers::Time::read().raw();
-
-    // We bypass the idle task by doing `KERNEL.n_procs - 1` iterations
-    for _ in unsafe { 0..(KERNEL.n_procs - 1) } {
-        if current_proc_id + 1 >= unsafe { KERNEL.n_procs } {
-            // We bypass the idle task here
-            current_proc_id = 1;
-        } else {
-            current_proc_id += 1;
-        }
-        let proc = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
-
-        match proc.state {
-            crate::task::ProcessState::Sleeping => {
-                if time > proc.wake_up_at {
-                    proc.wake_up_at = 0;
-                    return Some(current_proc_id);
-                }
-            }
-            crate::task::ProcessState::Running => {}
-            crate::task::ProcessState::Ready => {
-                crate::ktrace("going to run: \n");
-                let mut buf = [0; 20];
-                crate::ktrace(u64_to_str(current_proc_id as u64, &mut buf));
-                return Some(current_proc_id);
-            }
-            crate::task::ProcessState::Blocked => {}
-        }
-    }
-
-    None
-}
-
-fn schedule(reset_timer: bool) {
-    let mut buf = [0; 20];
-
-    let current_proc_id = unsafe { KERNEL.current_running_proc } as u64;
-
-    let current_process = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
-
-    match find_next_available_proc_id(current_proc_id as usize) {
-        Some(next_proc_id) => {
-            let next_process = unsafe { PROC_TABLE[next_proc_id].assume_init_mut() };
-
-            riscv::registers::Satp::empty()
-                .set_mode(riscv::registers::SatpMode::Sv39)
-                .set_ppn(next_process.root_table_pa)
-                .write();
-
-            if next_process.trap_frame.is_null() {
-                let tf = (next_process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
-                ktrace("trap frame is null, so setting it to: ");
-                ktrace(u64_to_str_hex(tf as u64, &mut buf));
-                next_process.trap_frame = tf;
-
-                unsafe {
-                    (*tf).sepc = crate::task::PROCESS_TEXT_ADDRESS.raw() as usize;
-                    (*tf).sp = crate::task::PROCESS_STACK_ADDRESS.raw() as usize - 4;
-                    (*tf).sstatus = riscv::registers::Sstatus::read()
-                        .enable_user_mode()
-                        .enable_supervisor_interrupts()
-                        .enable_user_page_access()
-                        .raw() as usize;
-                }
-                next_process.context.sp = tf as u64;
-                next_process.context.ra = trap_resume as *const () as u64;
-            } else {
-                ktrace("trap frame is not null\n");
-            }
-
-            next_process.ticks_at_started_running = riscv::registers::Time::read().raw();
-
-            if reset_timer {
-                // 4ms
-                riscv::registers::Stimecmp::new(
-                    4 * 10_000_000 / 1_000 + next_process.ticks_at_started_running,
-                )
-                .write();
-            }
-
-            next_process.state = crate::ProcessState::Running;
-
-            kdebug("current proc: \n\t");
-            kdebug(u64_to_str(current_proc_id, &mut buf));
-
-            kdebug("switching to: \n\t");
-            kdebug(u64_to_str(next_proc_id as u64, &mut buf));
-
-            if current_proc_id == next_proc_id as u64 {
-                return;
-            }
-
-            unsafe {
-                KERNEL.current_running_proc = next_proc_id;
-            }
-
-            unsafe {
-                swtch(
-                    (&mut current_process.context) as *mut Context,
-                    (&next_process.context) as *const Context,
-                );
-            }
-        }
-        None => unsafe {
-            let idle_process = PROC_TABLE[0].assume_init_mut();
-            idle_process.ticks_at_started_running = riscv::registers::Time::read().raw();
-            ktrace("scheduling bro\n");
-            if current_proc_id == 0 {
-                return;
-            }
-            riscv::registers::Sscratch::new(0).write();
-            KERNEL.current_running_proc = 0;
-            swtch(
-                (&mut current_process.context) as *mut Context,
-                (&PROC_TABLE[0].assume_init_ref().context) as *const Context,
-            );
-        },
     }
 }
 
@@ -473,7 +349,7 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
                         KERNEL.uart_wait_queue_len += 1;
                     }
 
-                    schedule(false);
+                    task::schedule(false);
                 }
             }
         }
