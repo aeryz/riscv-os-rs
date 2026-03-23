@@ -1,0 +1,57 @@
+use crate::arch::mmu::VirtualAddress;
+
+// TODO: should we represent registers as signed instead?
+#[repr(C)]
+#[derive(Clone, Default)]
+pub struct TrapFrame {
+    pub(super) ra: usize,
+    pub(super) sp: usize,
+    pub(super) gp: usize,
+    pub(super) tp: usize,
+    pub(super) t0: usize,
+    pub(super) t1: usize,
+    pub(super) t2: usize,
+    pub(super) s0: usize,
+    pub(super) s1: usize,
+    pub(super) a0: usize,
+    pub(super) a1: usize,
+    pub(super) a2: usize,
+    pub(super) a3: usize,
+    pub(super) a4: usize,
+    pub(super) a5: usize,
+    pub(super) a6: usize,
+    pub(super) a7: usize,
+    pub(super) s2: usize,
+    pub(super) s3: usize,
+    pub(super) s4: usize,
+    pub(super) s5: usize,
+    pub(super) s6: usize,
+    pub(super) s7: usize,
+    pub(super) s8: usize,
+    pub(super) s9: usize,
+    pub(super) s10: usize,
+    pub(super) s11: usize,
+    pub(super) t3: usize,
+    pub(super) t4: usize,
+    pub(super) t5: usize,
+    pub(super) t6: usize,
+    pub(super) sepc: usize,
+    pub(super) scause: usize,
+    pub(super) sstatus: usize,
+}
+
+impl TrapFrame {
+    /// Initializes a trap frame for a new task
+    pub fn initialize(instruction_ptr: VirtualAddress, stack_ptr: VirtualAddress) -> Self {
+        Self {
+            sepc: instruction_ptr.raw() as usize,
+            sp: stack_ptr.raw() as usize,
+            sstatus: riscv::registers::Sstatus::empty()
+                .enable_user_mode()
+                .enable_supervisor_interrupts()
+                .enable_user_page_access()
+                .raw() as usize,
+            ..Default::default()
+        }
+    }
+}

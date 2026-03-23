@@ -2,6 +2,10 @@ use core::arch::global_asm;
 
 use crate::arch::mmu::VirtualAddress;
 
+unsafe extern "C" {
+    pub fn swtch(from: *mut Context, to: *const Context);
+}
+
 // a0: context ptr from
 // a1: context ptr to
 global_asm!(
