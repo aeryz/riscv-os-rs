@@ -1,5 +1,7 @@
 use core::arch::global_asm;
 
+use crate::arch::mmu::VirtualAddress;
+
 // a0: context ptr from
 // a1: context ptr to
 global_asm!(
@@ -43,7 +45,7 @@ swtch:
     "#
 );
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 #[repr(C)]
 pub struct Context {
     pub ra: u64,
@@ -63,22 +65,11 @@ pub struct Context {
 }
 
 impl Context {
-    pub const fn empty() -> Self {
+    pub fn initialize(instruction_ptr: VirtualAddress, stack_ptr: VirtualAddress) -> Self {
         Self {
-            ra: 0,
-            sp: 0,
-            s0: 0,
-            s1: 0,
-            s2: 0,
-            s3: 0,
-            s4: 0,
-            s5: 0,
-            s6: 0,
-            s7: 0,
-            s8: 0,
-            s9: 0,
-            s10: 0,
-            s11: 0,
+            ra: instruction_ptr.raw(),
+            sp: stack_ptr.raw(),
+            ..Default::default()
         }
     }
 }

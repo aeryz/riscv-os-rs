@@ -29,3 +29,4 @@ def_impl_control_register!(Pmpaddr0, pmpaddr0);
 def_impl_control_register!(Mtvec, mtvec);
 def_impl_control_register!(Time, time);
 def_impl_control_register!(Stimecmp, stimecmp);
+def_impl_control_register!(Stval, stval);

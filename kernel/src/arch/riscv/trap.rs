@@ -2,7 +2,8 @@ use core::arch::global_asm;
 
 use crate::{
     KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
-    arch::Context, console, ktrace, plic, task,
+    arch::{Context, mmu::VirtualAddress},
+    console, ktrace, plic, task,
 };
 
 unsafe extern "C" {
@@ -189,9 +190,16 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
-    pub fn with_sepc(sepc: u64) -> Self {
+    /// Initializes a trap frame for a new task
+    pub fn initialize(instruction_ptr: VirtualAddress, stack_ptr: VirtualAddress) -> Self {
         Self {
-            sepc: sepc as usize,
+            sepc: instruction_ptr.raw() as usize,
+            sp: stack_ptr.raw() as usize,
+            sstatus: riscv::registers::Sstatus::empty()
+                .enable_user_mode()
+                .enable_supervisor_interrupts()
+                .enable_user_page_access()
+                .raw() as usize,
             ..Default::default()
         }
     }
@@ -315,8 +323,18 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             }
         }
         trap => {
-            crate::kdebug("unhandled trap");
+            crate::kdebug("unhandled trap\n\t");
             crate::kdebug(crate::u64_to_str(trap as u64, &mut [0; 20]));
+            crate::kdebug("stval: \n\t");
+            crate::kdebug(crate::u64_to_str_hex(
+                riscv::registers::Stval::read().raw(),
+                &mut [0; 32],
+            ));
+            crate::kdebug("sepc: \n\t");
+            crate::kdebug(crate::u64_to_str_hex(
+                riscv::registers::Sepc::read().raw(),
+                &mut [0; 32],
+            ));
             unreachable!()
         }
     }

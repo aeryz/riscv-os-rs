@@ -10,7 +10,7 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{arch::Context, arch::mmu::{PhysicalAddress, PageTable, PteFlags, VirtualAddress}, driver::uart::Uart};
+use crate::{arch::{Context, TrapFrame, mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress}}, driver::uart::Uart};
 use crate::helper::*;
 use crate::{
     task::{Process, ProcessState},
@@ -126,20 +126,17 @@ pub fn kprint<T: AsRef<[u8]>>(b: T) {
 
 impl Kernel {
     #[inline(never)]
-    pub fn create_kernel_process(&mut self, entry: u64) {
+    pub fn create_kernel_process(&mut self, entry: VirtualAddress) {
         let kernel_stack = mm::alloc().unwrap();
         let kernel_stack_va =
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
-
-        let mut context = Context::empty();
-        context.ra = entry;
-        context.sp = kernel_sp_va.raw();
+        let context = Context::initialize(entry, kernel_sp_va);
         unsafe {
             PROC_TABLE[self.n_procs].write(Process {
                 pid: self.n_procs,
                 kernel_sp: kernel_sp_va.raw(),
-                root_table_pa: 0,
+                root_table: PhysicalAddress::ZERO,
                 trap_frame: core::ptr::null_mut(),
                 context,
                 ticks_at_started_running: 0,
@@ -196,24 +193,23 @@ impl Kernel {
         mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+        let trap_frame_ptr = VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrame>() as u64).unwrap();
+        unsafe {
+            *(trap_frame_ptr.as_ptr_mut()) = TrapFrame::initialize(task::PROCESS_TEXT_ADDRESS, task::PROCESS_STACK_ADDRESS);
+        }
+
+        let context = Context::initialize(VirtualAddress::from_raw(arch::trap_resume as *const () as u64).unwrap(), trap_frame_ptr);
         unsafe {
             PROC_TABLE[self.n_procs].write(Process {
                 pid: self.n_procs,
                 kernel_sp: kernel_sp_va.raw(),
-                root_table_pa: process_root_table_pa.raw(),
-                trap_frame: core::ptr::null_mut(),
-                context: Context::empty(),
+                root_table: process_root_table_pa,
+                trap_frame: trap_frame_ptr.as_ptr_mut(),
+                context,
                 ticks_at_started_running: 0,
                 state: ProcessState::Ready,
                 wake_up_at: 0,
             });
-        }
-
-        unsafe {
-            // We save `size_of::<Process>()` amount in the stack to write
-            let kernel_sp = kernel_sp_va.as_ptr_mut::<Process>().sub(1);
-
-            *kernel_sp = PROC_TABLE[self.n_procs].assume_init_ref().clone();
         }
 
         self.n_procs += 1;
@@ -309,7 +305,7 @@ pub extern "C" fn kernel_higher_half_entry() -> ! {
     }
 
     unsafe {
-        KERNEL.create_kernel_process(idle_task as *const () as u64);
+        KERNEL.create_kernel_process(VirtualAddress::from_raw(idle_task as *const () as u64).unwrap());
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
         KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
     };
@@ -324,7 +320,7 @@ pub extern "C" fn kernel_higher_half_entry() -> ! {
         trap_entry as *const () as u64,
         task::PROCESS_STACK_ADDRESS.raw(),
         process.kernel_sp,
-        process.root_table_pa,
+        process.root_table.raw(),
     );
 }
 

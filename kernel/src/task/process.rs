@@ -1,4 +1,7 @@
-use crate::arch::{Context, TrapFrame, mmu::VirtualAddress};
+use crate::arch::{
+    Context, TrapFrame,
+    mmu::{PhysicalAddress, VirtualAddress},
+};
 
 pub const PROCESS_TEXT_ADDRESS: VirtualAddress =
     unsafe { VirtualAddress::from_raw_unchecked(0x1_0000) };
@@ -14,7 +17,7 @@ pub struct Process {
     /// Kernel stack pointer
     pub kernel_sp: u64,
     /// Root page table (PA) of this process
-    pub root_table_pa: u64,
+    pub root_table: PhysicalAddress,
     /// Trap frame
     pub trap_frame: *mut TrapFrame,
     /// Context

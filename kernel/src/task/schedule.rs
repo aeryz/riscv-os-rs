@@ -1,7 +1,7 @@
 use crate::{
     KERNEL, PROC_TABLE,
-    arch::{self, TrapFrame},
-    helper::{u64_to_str, u64_to_str_hex},
+    arch::{self},
+    helper::u64_to_str,
     kdebug, ktrace,
 };
 
@@ -16,31 +16,7 @@ pub fn schedule(reset_timer: bool) {
         Some(next_proc_id) => {
             let next_process = unsafe { PROC_TABLE[next_proc_id].assume_init_mut() };
 
-            riscv::registers::Satp::empty()
-                .set_mode(riscv::registers::SatpMode::Sv39)
-                .set_ppn(next_process.root_table_pa)
-                .write();
-
-            if next_process.trap_frame.is_null() {
-                let tf = (next_process.kernel_sp - size_of::<TrapFrame>() as u64) as *mut TrapFrame;
-                ktrace("trap frame is null, so setting it to: ");
-                ktrace(u64_to_str_hex(tf as u64, &mut buf));
-                next_process.trap_frame = tf;
-
-                unsafe {
-                    (*tf).sepc = crate::task::PROCESS_TEXT_ADDRESS.raw() as usize;
-                    (*tf).sp = crate::task::PROCESS_STACK_ADDRESS.raw() as usize - 4;
-                    (*tf).sstatus = riscv::registers::Sstatus::read()
-                        .enable_user_mode()
-                        .enable_supervisor_interrupts()
-                        .enable_user_page_access()
-                        .raw() as usize;
-                }
-                next_process.context.sp = tf as u64;
-                next_process.context.ra = arch::trap_resume as *const () as u64;
-            } else {
-                ktrace("trap frame is not null\n");
-            }
+            arch::mmu::set_root_page_table(next_process.root_table);
 
             next_process.ticks_at_started_running = riscv::registers::Time::read().raw();
 
