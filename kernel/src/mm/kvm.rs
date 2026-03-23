@@ -11,7 +11,9 @@ unsafe extern "C" {
 }
 
 /// Saves the kernel root table
+#[inline(never)]
 pub fn init() {
+    // TODO(aeryz): We want to have a separate spot for the allocatable memory.
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as u64) };
     allocator::init(memory_start);
@@ -33,6 +35,7 @@ pub fn init() {
             .set_mode(SatpMode::Sv39)
             .set_ppn((unsafe { &KERNEL_ROOT_PAGE_TABLE }) as *const PageTable as u64),
     );
+
     unsafe {
         core::arch::asm!(
             "li t0, {kernel_offset}",

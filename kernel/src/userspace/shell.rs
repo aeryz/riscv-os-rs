@@ -63,19 +63,5 @@ pub extern "C" fn shell() {
                 super::write(b"\n");
             }
         }
-
-        if let Some(binary) = [CMD_SHUTDOWN, CMD_HELP]
-            .iter()
-            .find(|bin| **bin == &buf[0..pos])
-        {
-            match *binary {
-                CMD_HELP => {}
-                // CMD_SHUTDOWN => {
-                //     syscalls::shutdown();
-                // }
-                _ => {}
-            }
-        } else {
-        }
     }
 }

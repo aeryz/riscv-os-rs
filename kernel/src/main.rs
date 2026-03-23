@@ -123,21 +123,6 @@ pub fn kprint<T: AsRef<[u8]>>(b: T) {
         .for_each(|b| unsafe { core::ptr::write_volatile(uart_addr as *mut u8, *b) });
 }
 
-#[inline(never)]
-pub fn initialize_kernel() -> ! {
-    mm::init();
-
-    unsafe {
-        asm!(
-        "li t0, {kernel_offset}",
-        "add t0, t0, {}",
-        "jr t0",
-        in(reg) kinit_cont as *const () as u64,
-        kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()), 
-        options(noreturn, nostack, preserves_flags))
-    }
-}
-
 impl Kernel {
     #[inline(never)]
     pub fn create_kernel_process(&mut self, entry: u64) {
@@ -257,7 +242,7 @@ pub extern "C" fn kmain(hart_id: u64, dtb_pa: u64) -> ! {
     kdebug("magic: ");
     kdebug(u64_to_str_hex(magic as u64, &mut buf));
 
-    enter_supervisor(start as *const () as usize);
+    enter_supervisor(supervisor_main_no_virtual_memory as *const () as usize);
 }
 
 #[inline(always)]
@@ -295,15 +280,32 @@ pub fn enter_supervisor(entry: usize) -> ! {
     riscv::mret();
 }
 
+/// The entrypoint for when the initial boot phase is done and M-mode switches
+/// to S-mode. Only responsibility here is to setup the kernel virtual memory,
+/// and immediately switch to the higher base kernel code at [`kernel_higher_half_entry`].
+/// Eg. 0x80000000 -> 0xffffffff80000000
 #[unsafe(no_mangle)]
-pub extern "C" fn start() -> ! {
+pub extern "C" fn supervisor_main_no_virtual_memory() -> ! {
     kdebug(b"hello from the supervisor\n");
 
-    initialize_kernel();
+    mm::init();
+
+    unsafe {
+        asm!(
+            "li t0, {kernel_offset}",
+            "add t0, t0, {}",
+            "jr t0",
+            in(reg) kernel_higher_half_entry as *const () as u64,
+            kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()), 
+            options(noreturn, nostack, preserves_flags))
+    }
 }
 
+/// The actual entry of the kernel. This function assumes that it is running on `S-mode` and the kernel virtual memory
+/// is already initialized. It does all the remaining kernel initializations and switches to the first userspace program.
+/// It does not return because it explicitly jumps to U-mode with `sret`.
 #[unsafe(no_mangle)]
-pub extern "C" fn kinit_cont() -> ! {
+pub extern "C" fn kernel_higher_half_entry() -> ! {
     let kernel_addr = unsafe { &KERNEL as *const Kernel as u64 };
     let mut buf = [0; 20];
     kdebug(b"kernel is loaded at after paging: ");
@@ -314,15 +316,10 @@ pub extern "C" fn kinit_cont() -> ! {
         UART.enable_interrupts();
     }
 
-    // unsafe {
-    //     KERNEL.create_process(userspace::shell::shell as *const () as u64);
-    // };
-
     unsafe {
         KERNEL.create_kernel_process(idle_task as *const () as u64);
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
         KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
-        // KERNEL.create_process(userspace::userspace_2 as *const () as u64);
     };
 
     unsafe {
@@ -404,15 +401,15 @@ extern "C" fn idle_task() {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop {
-        core::hint::spin_loop();
-    }
+    halt()
 }
 
 #[unsafe(no_mangle)]
 #[inline(never)]
-pub extern "C" fn halt() {
+pub extern "C" fn halt() -> ! {
     unsafe {
-        core::ptr::write_volatile(QEMU_TEST, 0x5555);
+        loop {
+            core::ptr::write_volatile(QEMU_TEST, 0x5555);
+        }
     }
 }
