@@ -1,10 +1,11 @@
 use core::arch::global_asm;
 
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE, console,
-    context::Context,
+    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
+    arch::Context,
+    console,
     helper::{u64_to_str, u64_to_str_hex},
-    kdebug, ktrace, plic, process,
+    kdebug, ktrace, plic,
 };
 
 unsafe extern "C" {
@@ -227,7 +228,8 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                             // Whenever a read happens, iterate through the uart queue and set all the waiting processes to
                             // ready.
                             for idx in KERNEL.uart_wait_queue.iter_mut().take_while(|i| **i != 0) {
-                                PROC_TABLE[*idx].assume_init_mut().state = process::State::Ready;
+                                PROC_TABLE[*idx].assume_init_mut().state =
+                                    crate::task::ProcessState::Ready;
                                 *idx = 0;
                             }
                             KERNEL.uart_wait_queue_len = 0;
@@ -259,7 +261,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 unsafe {
                     PROC_TABLE[KERNEL.current_running_proc]
                         .assume_init_mut()
-                        .state = process::State::Ready;
+                        .state = crate::task::ProcessState::Ready;
                 }
                 schedule(true);
             } else {
@@ -302,7 +304,8 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
                     let ms_to_ticks = |ms: u64| ms * 10_000_000 / 1_000;
 
-                    current_process.state = process::State::Sleeping;
+                    current_process.state = crate::task::ProcessState::Sleeping;
+
                     current_process.wake_up_at =
                         riscv::registers::Time::read().raw() + ms_to_ticks(ms);
 
@@ -336,20 +339,20 @@ fn find_next_available_proc_id(mut current_proc_id: usize) -> Option<usize> {
         let proc = unsafe { PROC_TABLE[current_proc_id as usize].assume_init_mut() };
 
         match proc.state {
-            process::State::Sleeping => {
+            crate::task::ProcessState::Sleeping => {
                 if time > proc.wake_up_at {
                     proc.wake_up_at = 0;
                     return Some(current_proc_id);
                 }
             }
-            process::State::Running => {}
-            process::State::Ready => {
+            crate::task::ProcessState::Running => {}
+            crate::task::ProcessState::Ready => {
                 crate::ktrace("going to run: \n");
                 let mut buf = [0; 20];
                 crate::ktrace(u64_to_str(current_proc_id as u64, &mut buf));
                 return Some(current_proc_id);
             }
-            process::State::Blocked => {}
+            crate::task::ProcessState::Blocked => {}
         }
     }
 
@@ -379,8 +382,8 @@ fn schedule(reset_timer: bool) {
                 next_process.trap_frame = tf;
 
                 unsafe {
-                    (*tf).sepc = crate::process::PROC_TEXT_VA as usize;
-                    (*tf).sp = crate::process::PROC_STACK_VA as usize - 4;
+                    (*tf).sepc = crate::task::PROCESS_TEXT_ADDRESS.raw() as usize;
+                    (*tf).sp = crate::task::PROCESS_STACK_ADDRESS.raw() as usize - 4;
                     (*tf).sstatus = riscv::registers::Sstatus::read()
                         .enable_user_mode()
                         .enable_supervisor_interrupts()
@@ -403,7 +406,7 @@ fn schedule(reset_timer: bool) {
                 .write();
             }
 
-            next_process.state = process::State::Running;
+            next_process.state = crate::ProcessState::Running;
 
             kdebug("current proc: \n\t");
             kdebug(u64_to_str(current_proc_id, &mut buf));
@@ -462,7 +465,7 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
                     unsafe {
                         PROC_TABLE[KERNEL.current_running_proc]
                             .assume_init_mut()
-                            .state = process::State::Blocked;
+                            .state = crate::ProcessState::Blocked;
                     }
                     unsafe {
                         KERNEL.uart_wait_queue[KERNEL.uart_wait_queue_len] =

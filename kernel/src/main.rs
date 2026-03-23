@@ -10,23 +10,22 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{context::Context, driver::uart::Uart, mm::PhysicalAddress, process::State};
+use crate::{arch::Context, driver::uart::Uart, mm::PhysicalAddress};
 use crate::{helper::*, mm::VirtualAddress};
 use crate::{
     mm::{PageTable, PteFlags},
-    process::Process,
+    task::{Process, ProcessState},
 };
 
 const QEMU_TEST: *mut u32 = (KERNEL_DIRECT_MAPPING_BASE + 0x0010_0000) as *mut u32;
 
+pub mod arch;
 pub mod console;
-pub mod context;
 pub mod driver;
 pub mod helper;
 pub mod mm;
 pub mod plic;
-pub mod process;
-pub mod trap;
+pub mod task;
 pub(crate) mod userspace;
 
 global_asm!(include_str!("start.s"));
@@ -145,7 +144,7 @@ impl Kernel {
                 trap_frame: core::ptr::null_mut(),
                 context,
                 ticks_at_started_running: 0,
-                state: State::Ready,
+                state: ProcessState::Ready,
                 wake_up_at: 0,
             });
         }
@@ -206,7 +205,7 @@ impl Kernel {
                 trap_frame: core::ptr::null_mut(),
                 context: Context::empty(),
                 ticks_at_started_running: 0,
-                state: State::Ready,
+                state: ProcessState::Ready,
                 wake_up_at: 0,
             });
         }
@@ -322,9 +321,9 @@ pub extern "C" fn kernel_higher_half_entry() -> ! {
     let process = unsafe { PROC_TABLE[1].assume_init_ref() };
 
     enter_usermode(
-        process::PROC_TEXT_VA,
+        task::PROCESS_TEXT_ADDRESS.raw(),
         trap_entry as *const () as u64,
-        process::PROC_STACK_VA,
+        task::PROCESS_STACK_ADDRESS.raw(),
         process.kernel_sp,
         process.root_table_pa,
     );

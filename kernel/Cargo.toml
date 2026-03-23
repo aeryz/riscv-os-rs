@@ -12,5 +12,6 @@ riscv = { workspace = true }
 cc = "1"
 
 [features]
-default = [ "sv39" ]
+default = [ "riscv" ]
+riscv = [ "sv39" ]
 sv39 = []
