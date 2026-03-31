@@ -79,3 +79,9 @@ impl PhysicalAddress {
         VirtualAddress::from_raw(self.0)
     }
 }
+
+impl Into<usize> for PhysicalAddress {
+    fn into(self) -> usize {
+        self.raw() as usize
+    }
+}

@@ -4,17 +4,19 @@
 
 use core::{
     arch::{asm, global_asm},
-    mem::MaybeUninit,
     panic::PanicInfo,
 };
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{arch::{Context, TrapFrame, mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress}}, driver::uart::Uart};
+use crate::{arch::{Architecture, Context, ContextOf, TrapFrame, TrapFrameOf, mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress}}, driver::uart::Uart};
 use crate::helper::*;
 use crate::{
     task::{Process, ProcessState},
 };
+
+#[cfg(feature = "riscv")]
+pub type Arch = arch::Riscv;
 
 const QEMU_TEST: *mut u32 = (KERNEL_DIRECT_MAPPING_BASE + 0x0010_0000) as *mut u32;
 
@@ -45,7 +47,6 @@ const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 
 pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
 pub static mut UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE) as usize);
-pub static mut SCHEDULER_CTX: MaybeUninit<Context> = MaybeUninit::zeroed();
 
 pub static mut KERNEL: Kernel = Kernel {
     // TODO: temporary queue to store the processes that are blocked by the uart
@@ -125,7 +126,7 @@ impl Kernel {
         let kernel_stack_va =
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
-        let context = Context::initialize(entry, kernel_sp_va);
+        let context = ContextOf::<Arch>::initialize(entry, kernel_sp_va);
 
         task::add_process(
             Process {
@@ -187,12 +188,12 @@ impl Kernel {
         mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
-        let trap_frame_ptr = VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrame>() as u64).unwrap();
+        let trap_frame_ptr = VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrameOf<Arch>>() as u64).unwrap();
         unsafe {
-            *(trap_frame_ptr.as_ptr_mut()) = TrapFrame::initialize(task::PROCESS_TEXT_ADDRESS, task::PROCESS_STACK_ADDRESS);
+            *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(task::PROCESS_TEXT_ADDRESS, task::PROCESS_STACK_ADDRESS);
         }
 
-        let context = Context::initialize(VirtualAddress::from_raw(arch::trap_resume as *const () as u64).unwrap(), trap_frame_ptr);
+        let context = ContextOf::<Arch>::initialize(VirtualAddress::from_raw(Arch::trap_resume_ptr()  as u64).unwrap(), trap_frame_ptr);
 
         task::add_process(Process {
             pid: 0,

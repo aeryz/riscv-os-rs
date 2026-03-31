@@ -1,6 +1,6 @@
 use core::arch::global_asm;
 
-use crate::arch::TrapFrame;
+use super::trap_frame::TrapFrame;
 
 unsafe extern "C" {
     pub fn trap_resume();

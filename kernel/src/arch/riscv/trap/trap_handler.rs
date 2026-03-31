@@ -1,9 +1,11 @@
 use crate::{
-    KERNEL, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE, arch::TrapFrame,
+    Arch, KERNEL, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
+    arch::{
+        Architecture,
+        riscv::trap::trap_frame::{TrapCause, TrapFrame},
+    },
     console, ktrace, plic, task,
 };
-
-use super::TrapCause;
 
 #[unsafe(no_mangle)]
 extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
@@ -46,9 +48,9 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             ktrace("timer interrupt\n");
             let current_process = task::get_currently_running_process_mut();
 
-            let nanos = |ticks: u64| ticks * 1_000_000_000 / 10_000_000;
+            let nanos = |ticks| ticks * 1_000_000_000 / 10_000_000;
 
-            let current_ticks = riscv::registers::Time::read().raw();
+            let current_ticks = Arch::read_current_time();
 
             // 32ms
             if nanos(current_ticks) - nanos(current_process.ticks_at_started_running)
@@ -59,7 +61,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 task::schedule(true);
             } else {
                 // 4ms
-                riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + current_ticks).write();
+                Arch::set_timer(4 * 10_000_000 / 1_000 + current_ticks);
             }
         }
         TrapCause::Syscall => {
@@ -89,16 +91,15 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     trap_frame.a0 = n_read;
                 }
                 SYSCALL_SLEEP_MS => {
-                    let ms = trap_frame.get_arg::<0>() as u64;
+                    let ms = trap_frame.get_arg::<0>();
 
                     let current_process = task::get_currently_running_process_mut();
 
-                    let ms_to_ticks = |ms: u64| ms * 10_000_000 / 1_000;
+                    let ms_to_ticks = |ms| ms * 10_000_000 / 1_000;
 
                     current_process.state = crate::task::ProcessState::Sleeping;
 
-                    current_process.wake_up_at =
-                        riscv::registers::Time::read().raw() + ms_to_ticks(ms);
+                    current_process.wake_up_at = Arch::read_current_time() + ms_to_ticks(ms);
 
                     task::schedule(false);
                 }

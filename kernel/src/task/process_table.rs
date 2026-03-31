@@ -1,23 +1,25 @@
+use core::mem::MaybeUninit;
+
 use crate::task::Process;
 
 static mut PROC_TABLE: ProcessTable = ProcessTable::zeroed();
 
 #[repr(C)]
 struct ProcessTable {
-    table: [Process; 128],
+    table: [MaybeUninit<Process>; 128],
     head: usize,
 }
 
 impl ProcessTable {
     const fn zeroed() -> Self {
         Self {
-            table: [const { Process::empty() }; 128],
+            table: [const { MaybeUninit::zeroed() }; 128],
             head: 0,
         }
     }
 
     pub fn new_process(&mut self, process: Process) {
-        self.table[self.head] = process;
+        self.table[self.head].write(process);
         self.head += 1;
     }
 }
@@ -32,14 +34,14 @@ pub fn get_process_at(index: usize) -> &'static Process {
     let table = unsafe { &PROC_TABLE };
     debug_assert!(index <= table.head);
 
-    &table.table[index]
+    unsafe { table.table[index].assume_init_ref() }
 }
 
 pub fn get_process_at_mut(index: usize) -> &'static mut Process {
     let table = unsafe { &mut PROC_TABLE };
     debug_assert!(index <= table.head);
 
-    &mut table.table[index]
+    unsafe { table.table[index].assume_init_mut() }
 }
 
 pub fn iterate_process_table_mut(start_idx: usize) -> impl Iterator<Item = &'static mut Process> {
@@ -47,5 +49,7 @@ pub fn iterate_process_table_mut(start_idx: usize) -> impl Iterator<Item = &'sta
 
     let (left, right) = table.table.split_at_mut(start_idx);
 
-    left.iter_mut().chain(right)
+    left.iter_mut()
+        .map(|p| unsafe { p.assume_init_mut() })
+        .chain(right.iter_mut().map(|p| unsafe { p.assume_init_mut() }))
 }

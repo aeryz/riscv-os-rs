@@ -1,4 +1,4 @@
-use crate::arch::mmu::VirtualAddress;
+use crate::arch::{self, Riscv, VirtualAddressOf};
 
 // TODO: should we represent registers as signed instead?
 #[repr(C)]
@@ -41,20 +41,6 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
-    /// Initializes a trap frame for a new task
-    pub fn initialize(instruction_ptr: VirtualAddress, stack_ptr: VirtualAddress) -> Self {
-        Self {
-            sepc: instruction_ptr.raw() as usize,
-            sp: stack_ptr.raw() as usize,
-            sstatus: riscv::registers::Sstatus::empty()
-                .enable_user_mode()
-                .enable_supervisor_interrupts()
-                .enable_user_page_access()
-                .raw() as usize,
-            ..Default::default()
-        }
-    }
-
     pub fn get_cause(&self) -> TrapCause {
         self.scause.into()
     }
@@ -88,6 +74,24 @@ impl From<usize> for TrapCause {
             0x8000000000000005 => TrapCause::TimerInterrupt,
             0x8000000000000009 => TrapCause::ExternalIrq,
             _ => TrapCause::Unknown(value),
+        }
+    }
+}
+
+impl arch::TrapFrame<Riscv> for TrapFrame {
+    fn initialize(
+        instruction_ptr: VirtualAddressOf<Riscv>,
+        stack_ptr: VirtualAddressOf<Riscv>,
+    ) -> Self {
+        Self {
+            sepc: instruction_ptr.into(),
+            sp: stack_ptr.into(),
+            sstatus: riscv::registers::Sstatus::empty()
+                .enable_user_mode()
+                .enable_supervisor_interrupts()
+                .enable_user_page_access()
+                .raw() as usize,
+            ..Default::default()
         }
     }
 }

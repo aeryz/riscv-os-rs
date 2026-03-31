@@ -1,5 +1,6 @@
 use crate::{
-    arch::{self},
+    Arch,
+    arch::{Architecture, ContextOf, MemoryModel},
     helper::u64_to_str,
     kdebug,
     task::{self, Process},
@@ -24,16 +25,13 @@ pub fn schedule(reset_timer: bool) {
         Some(next_proc_id) => {
             let next_process = task::get_process_at_mut(next_proc_id);
 
-            arch::mmu::set_root_page_table(next_process.root_table);
+            Arch::set_root_page_table(next_process.root_table);
 
-            next_process.ticks_at_started_running = riscv::registers::Time::read().raw();
+            next_process.ticks_at_started_running = Arch::read_current_time();
 
             if reset_timer {
                 // 4ms
-                riscv::registers::Stimecmp::new(
-                    4 * 10_000_000 / 1_000 + next_process.ticks_at_started_running,
-                )
-                .write();
+                Arch::set_timer(4 * 10_000_000 / 1_000 + next_process.ticks_at_started_running);
             }
 
             next_process.state = crate::ProcessState::Running;
@@ -50,26 +48,24 @@ pub fn schedule(reset_timer: bool) {
 
             ctx.current_running_proc_idx = next_proc_id;
 
-            unsafe {
-                arch::swtch(
-                    (&mut current_process.context) as *mut arch::Context,
-                    (&next_process.context) as *const arch::Context,
-                );
-            }
+            Arch::switch(
+                (&mut current_process.context) as *mut ContextOf<Arch>,
+                (&next_process.context) as *const ContextOf<Arch>,
+            );
         }
-        None => unsafe {
+        None => {
             let idle_process = task::get_process_at_mut(0);
-            idle_process.ticks_at_started_running = riscv::registers::Time::read().raw();
+            idle_process.ticks_at_started_running = Arch::read_current_time();
             if ctx.current_running_proc_idx == 0 {
                 return;
             }
-            riscv::registers::Sscratch::new(0).write();
             ctx.current_running_proc_idx = 0;
-            arch::swtch(
-                (&mut current_process.context) as *mut arch::Context,
-                &idle_process.context as *const arch::Context,
+            Arch::set_kernel_sp(0);
+            Arch::switch(
+                (&mut current_process.context) as *mut ContextOf<Arch>,
+                &idle_process.context as *const ContextOf<Arch>,
             );
-        },
+        }
     }
 }
 
@@ -84,9 +80,8 @@ pub fn get_currently_running_process_mut() -> &'static mut Process {
 }
 
 fn find_next_available_proc_id(ctx: &Scheduler) -> Option<usize> {
-    let time = riscv::registers::Time::read().raw();
+    let time = Arch::read_current_time();
 
-    // We bypass the idle task by doing `KERNEL.n_procs - 1` iterations
     for proc in task::iterate_process_table_mut(ctx.current_running_proc_idx) {
         if proc.pid == 0 {
             continue;

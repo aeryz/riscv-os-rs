@@ -72,3 +72,9 @@ impl VirtualAddress {
         self.0
     }
 }
+
+impl Into<usize> for VirtualAddress {
+    fn into(self) -> usize {
+        self.raw() as usize
+    }
+}

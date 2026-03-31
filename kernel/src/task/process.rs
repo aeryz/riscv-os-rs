@@ -1,6 +1,9 @@
-use crate::arch::{
-    Context, TrapFrame,
-    mmu::{PhysicalAddress, VirtualAddress},
+use crate::{
+    Arch,
+    arch::{
+        ContextOf, TrapFrameOf,
+        mmu::{PhysicalAddress, VirtualAddress},
+    },
 };
 
 pub const PROCESS_TEXT_ADDRESS: VirtualAddress =
@@ -19,30 +22,15 @@ pub struct Process {
     /// Root page table (PA) of this process
     pub root_table: PhysicalAddress,
     /// Trap frame
-    pub trap_frame: *mut TrapFrame,
+    pub trap_frame: *mut TrapFrameOf<Arch>,
     /// Context
-    pub context: Context,
+    pub context: ContextOf<Arch>,
     /// The tick count at when the process started running
-    pub ticks_at_started_running: u64,
+    pub ticks_at_started_running: usize,
     /// The current state of the process
     pub state: ProcessState,
     /// Wake up time in ticks
-    pub wake_up_at: u64,
-}
-
-impl Process {
-    pub(super) const fn empty() -> Self {
-        Self {
-            pid: 0,
-            kernel_sp: 0,
-            root_table: PhysicalAddress::ZERO,
-            trap_frame: core::ptr::null_mut(),
-            context: Context::empty(),
-            ticks_at_started_running: 0,
-            state: ProcessState::Blocked,
-            wake_up_at: 0,
-        }
-    }
+    pub wake_up_at: usize,
 }
 
 #[derive(Copy, Clone)]
