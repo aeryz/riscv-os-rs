@@ -1,7 +1,8 @@
 use crate::{
     arch::{self},
     helper::u64_to_str,
-    kdebug, ktrace, task,
+    kdebug,
+    task::{self, Process},
 };
 
 static mut SCHEDULER_CTX: Scheduler = Scheduler {
@@ -21,7 +22,6 @@ pub fn schedule(reset_timer: bool) {
 
     match find_next_available_proc_id(ctx) {
         Some(next_proc_id) => {
-            ctx.current_running_proc_idx = next_proc_id;
             let next_process = task::get_process_at_mut(next_proc_id);
 
             arch::mmu::set_root_page_table(next_process.root_table);
@@ -73,11 +73,24 @@ pub fn schedule(reset_timer: bool) {
     }
 }
 
+pub fn get_currently_running_process() -> &'static Process {
+    let scheduler = unsafe { &SCHEDULER_CTX };
+    task::get_process_at(scheduler.current_running_proc_idx)
+}
+
+pub fn get_currently_running_process_mut() -> &'static mut Process {
+    let scheduler = unsafe { &SCHEDULER_CTX };
+    task::get_process_at_mut(scheduler.current_running_proc_idx)
+}
+
 fn find_next_available_proc_id(ctx: &Scheduler) -> Option<usize> {
     let time = riscv::registers::Time::read().raw();
 
     // We bypass the idle task by doing `KERNEL.n_procs - 1` iterations
     for proc in task::iterate_process_table_mut(ctx.current_running_proc_idx) {
+        if proc.pid == 0 {
+            continue;
+        }
         match proc.state {
             crate::task::ProcessState::Sleeping => {
                 if time > proc.wake_up_at {

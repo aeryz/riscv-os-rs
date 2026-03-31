@@ -1,5 +1,3 @@
-use core::{cell::OnceCell, mem::MaybeUninit};
-
 use crate::task::Process;
 
 static mut PROC_TABLE: ProcessTable = ProcessTable::zeroed();
@@ -24,8 +22,9 @@ impl ProcessTable {
     }
 }
 
-pub fn add_process(process: Process) {
+pub fn add_process(mut process: Process) {
     let table = unsafe { &mut PROC_TABLE };
+    process.pid = table.head;
     table.new_process(process);
 }
 

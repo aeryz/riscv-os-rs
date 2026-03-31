@@ -47,7 +47,7 @@ pub fn init() {
             .set_mode(SatpMode::Sv39)
             .set_ppn((unsafe { &KERNEL_ROOT_PAGE_TABLE }) as *const PageTable as u64),
     );
-    crate::kdebug("after satp\n");
+    // crate::kdebug("after satp\n");
 
     riscv::const_add_to_sp::<
         { (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()) as usize },

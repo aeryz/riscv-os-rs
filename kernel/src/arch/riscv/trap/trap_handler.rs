@@ -44,8 +44,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
         }
         TrapCause::TimerInterrupt => {
             ktrace("timer interrupt\n");
-            let current_process =
-                unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
+            let current_process = task::get_currently_running_process_mut();
 
             let nanos = |ticks: u64| ticks * 1_000_000_000 / 10_000_000;
 
@@ -56,11 +55,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 > 4_000_000 * 8
             {
                 ktrace("time is up, we are scheduling\n");
-                unsafe {
-                    PROC_TABLE[KERNEL.current_running_proc]
-                        .assume_init_mut()
-                        .state = crate::task::ProcessState::Ready;
-                }
+                current_process.state = task::ProcessState::Ready;
                 task::schedule(true);
             } else {
                 // 4ms
@@ -96,8 +91,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 SYSCALL_SLEEP_MS => {
                     let ms = trap_frame.get_arg::<0>() as u64;
 
-                    let current_process =
-                        unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
+                    let current_process = task::get_currently_running_process_mut();
 
                     let ms_to_ticks = |ms: u64| ms * 10_000_000 / 1_000;
 
@@ -148,14 +142,10 @@ pub fn syscall_read(buf: &mut [u8]) -> usize {
                 }
                 None => {
                     ktrace("couldn't read anything, scheduling\n");
+                    let current_process = task::get_currently_running_process_mut();
+                    current_process.state = task::ProcessState::Blocked;
                     unsafe {
-                        PROC_TABLE[KERNEL.current_running_proc]
-                            .assume_init_mut()
-                            .state = crate::ProcessState::Blocked;
-                    }
-                    unsafe {
-                        KERNEL.uart_wait_queue[KERNEL.uart_wait_queue_len] =
-                            KERNEL.current_running_proc;
+                        KERNEL.uart_wait_queue[KERNEL.uart_wait_queue_len] = current_process.pid;
                         KERNEL.uart_wait_queue_len += 1;
                     }
 
