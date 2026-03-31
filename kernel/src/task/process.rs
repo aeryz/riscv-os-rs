@@ -30,6 +30,21 @@ pub struct Process {
     pub wake_up_at: u64,
 }
 
+impl Process {
+    pub(super) const fn empty() -> Self {
+        Self {
+            pid: 0,
+            kernel_sp: 0,
+            root_table: PhysicalAddress::ZERO,
+            trap_frame: core::ptr::null_mut(),
+            context: Context::empty(),
+            ticks_at_started_running: 0,
+            state: ProcessState::Blocked,
+            wake_up_at: 0,
+        }
+    }
+}
+
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub enum ProcessState {

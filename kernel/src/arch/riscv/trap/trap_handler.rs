@@ -1,19 +1,15 @@
 use crate::{
-    KERNEL, PROC_TABLE, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
-    arch::TrapFrame, console, ktrace, plic, task,
+    KERNEL, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE, arch::TrapFrame,
+    console, ktrace, plic, task,
 };
+
+use super::TrapCause;
 
 #[unsafe(no_mangle)]
 extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
-    unsafe {
-        PROC_TABLE[KERNEL.current_running_proc]
-            .assume_init_mut()
-            .trap_frame = trap_frame as *mut TrapFrame;
-    }
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
-    match trap_frame.scause {
-        // I = 1, C = 9 = supervisor external interrupt
-        0x8000000000000009 => {
+    match trap_frame.get_cause() {
+        TrapCause::ExternalIrq => {
             // TODO: only support the hart = 0
             let interrupt_id = plic::plic_claim(0);
             match interrupt_id {
@@ -31,7 +27,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                             // Whenever a read happens, iterate through the uart queue and set all the waiting processes to
                             // ready.
                             for idx in KERNEL.uart_wait_queue.iter_mut().take_while(|i| **i != 0) {
-                                PROC_TABLE[*idx].assume_init_mut().state =
+                                task::get_process_at_mut(*idx).state =
                                     crate::task::ProcessState::Ready;
                                 *idx = 0;
                             }
@@ -46,8 +42,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 }
             }
         }
-        // I = 1, C = 5 = timer tick
-        0x8000000000000005 => {
+        TrapCause::TimerInterrupt => {
             ktrace("timer interrupt\n");
             let current_process =
                 unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
@@ -72,16 +67,15 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 riscv::registers::Stimecmp::new(4 * 10_000_000 / 1_000 + current_ticks).write();
             }
         }
-        // I = 0, C = 8 = environment call from U-Mode
-        8 => {
+        TrapCause::Syscall => {
             // This is a syscall, so we move the return program counter to just after the `ecall`
             trap_frame.sepc += 4;
             let syscall_number = trap_frame.a7;
             match syscall_number {
                 SYSCALL_WRITE => {
-                    let _fd = trap_frame.a0;
-                    let buf = trap_frame.a1 as *const u8;
-                    let count = trap_frame.a2;
+                    let _fd = trap_frame.get_arg::<0>();
+                    let buf = trap_frame.get_arg::<1>() as *const u8;
+                    let count = trap_frame.get_arg::<2>();
 
                     let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
 
@@ -90,9 +84,9 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     trap_frame.a0 = count;
                 }
                 SYSCALL_READ => {
-                    let _fd = trap_frame.a0;
-                    let buf = trap_frame.a1 as *mut u8;
-                    let count = trap_frame.a2;
+                    let _fd = trap_frame.get_arg::<0>();
+                    let buf = trap_frame.get_arg::<1>() as *mut u8;
+                    let count = trap_frame.get_arg::<2>();
 
                     let buf = unsafe { core::slice::from_raw_parts_mut(buf, count) };
 
@@ -100,7 +94,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                     trap_frame.a0 = n_read;
                 }
                 SYSCALL_SLEEP_MS => {
-                    let ms = trap_frame.a0 as u64;
+                    let ms = trap_frame.get_arg::<0>() as u64;
 
                     let current_process =
                         unsafe { PROC_TABLE[KERNEL.current_running_proc].assume_init_mut() };
@@ -120,7 +114,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 _ => unreachable!(),
             }
         }
-        trap => {
+        TrapCause::Unknown(trap) => {
             crate::kdebug("unhandled trap\n\t");
             crate::kdebug(crate::u64_to_str(trap as u64, &mut [0; 20]));
             crate::kdebug("stval: \n\t");

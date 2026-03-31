@@ -54,4 +54,40 @@ impl TrapFrame {
             ..Default::default()
         }
     }
+
+    pub fn get_cause(&self) -> TrapCause {
+        self.scause.into()
+    }
+
+    pub const fn get_arg<const IDX: usize>(&self) -> usize {
+        match IDX {
+            0 => self.a0,
+            1 => self.a1,
+            2 => self.a2,
+            3 => self.a3,
+            4 => self.a4,
+            5 => self.a5,
+            6 => self.a6,
+            7 => self.a7,
+            _ => panic!("invalid"),
+        }
+    }
+}
+
+pub enum TrapCause {
+    Syscall,
+    TimerInterrupt,
+    ExternalIrq,
+    Unknown(usize),
+}
+
+impl From<usize> for TrapCause {
+    fn from(value: usize) -> Self {
+        match value {
+            0x8 => TrapCause::Syscall,
+            0x8000000000000005 => TrapCause::TimerInterrupt,
+            0x8000000000000009 => TrapCause::ExternalIrq,
+            _ => TrapCause::Unknown(value),
+        }
+    }
 }

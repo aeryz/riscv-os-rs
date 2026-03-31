@@ -69,6 +69,25 @@ pub struct Context {
 }
 
 impl Context {
+    pub const fn empty() -> Self {
+        Self {
+            ra: 0,
+            sp: 0,
+            s0: 0,
+            s1: 0,
+            s2: 0,
+            s3: 0,
+            s4: 0,
+            s5: 0,
+            s6: 0,
+            s7: 0,
+            s8: 0,
+            s9: 0,
+            s10: 0,
+            s11: 0,
+        }
+    }
+
     pub fn initialize(instruction_ptr: VirtualAddress, stack_ptr: VirtualAddress) -> Self {
         Self {
             ra: instruction_ptr.raw(),

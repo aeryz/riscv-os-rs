@@ -48,14 +48,10 @@ pub static mut UART: Uart = Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPIN
 pub static mut SCHEDULER_CTX: MaybeUninit<Context> = MaybeUninit::zeroed();
 
 pub static mut KERNEL: Kernel = Kernel {
-    current_running_proc: 0,
-    n_procs: 0,
     // TODO: temporary queue to store the processes that are blocked by the uart
     uart_wait_queue: [0; 16],
     uart_wait_queue_len: 0,
 };
-
-pub static mut PROC_TABLE: [MaybeUninit<Process>; 3] = [const { MaybeUninit::uninit() }; 3];
 
 pub const DEBUG_LEVEL: DebugLevel = {
     if let Some(debug_level) = option_env!("DEBUG_LEVEL") {
@@ -72,8 +68,6 @@ pub const DEBUG_LEVEL: DebugLevel = {
 
 #[repr(C)]
 pub struct Kernel {
-    current_running_proc: usize,
-    n_procs: usize,
     uart_wait_queue: [usize; 16],
     uart_wait_queue_len: usize,
 }
@@ -132,9 +126,10 @@ impl Kernel {
             VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE).unwrap();
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
         let context = Context::initialize(entry, kernel_sp_va);
-        unsafe {
-            PROC_TABLE[self.n_procs].write(Process {
-                pid: self.n_procs,
+
+        task::add_process(
+            Process {
+                pid: 0,
                 kernel_sp: kernel_sp_va.raw(),
                 root_table: PhysicalAddress::ZERO,
                 trap_frame: core::ptr::null_mut(),
@@ -142,9 +137,8 @@ impl Kernel {
                 ticks_at_started_running: 0,
                 state: ProcessState::Ready,
                 wake_up_at: 0,
-            });
-        }
-        self.n_procs += 1;
+            } 
+        );
     }
 
     #[inline(never)]
@@ -199,20 +193,18 @@ impl Kernel {
         }
 
         let context = Context::initialize(VirtualAddress::from_raw(arch::trap_resume as *const () as u64).unwrap(), trap_frame_ptr);
-        unsafe {
-            PROC_TABLE[self.n_procs].write(Process {
-                pid: self.n_procs,
-                kernel_sp: kernel_sp_va.raw(),
-                root_table: process_root_table_pa,
-                trap_frame: trap_frame_ptr.as_ptr_mut(),
-                context,
-                ticks_at_started_running: 0,
-                state: ProcessState::Ready,
-                wake_up_at: 0,
-            });
-        }
 
-        self.n_procs += 1;
+        task::add_process(Process {
+            pid: 0,
+            kernel_sp: kernel_sp_va.raw(),
+            root_table: process_root_table_pa,
+            trap_frame: trap_frame_ptr.as_ptr_mut(),
+            context,
+            ticks_at_started_running: 0,
+            state: ProcessState::Ready,
+            wake_up_at: 0,
+        });
+
     }
 }
 
@@ -310,10 +302,7 @@ pub extern "C" fn kernel_higher_half_entry() -> ! {
         KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
     };
 
-    unsafe {
-        KERNEL.current_running_proc = 1;
-    }
-    let process = unsafe { PROC_TABLE[1].assume_init_ref() };
+    let process = task::get_process_at(1);
 
     enter_usermode(
         task::PROCESS_TEXT_ADDRESS.raw(),
