@@ -6,6 +6,8 @@ pub use riscv::*;
 
 /// Defines all the architecture-dependent functionality.
 pub trait Architecture {
+    const CPU_HERTZ: usize;
+
     type Context: Context<Self>;
     type MemoryModel: MemoryModel;
     type TrapFrame: TrapFrame<Self>;
@@ -19,6 +21,14 @@ pub trait Architecture {
     fn set_kernel_sp(value: usize);
 
     fn trap_resume_ptr() -> *const ();
+
+    fn ticks_to_nanos(ticks: usize) -> usize {
+        ticks * 1_000_000_000 / Self::CPU_HERTZ
+    }
+
+    fn nanos_to_ticks(nanos: usize) -> usize {
+        nanos * Self::CPU_HERTZ / 1_000_000_000
+    }
 }
 
 pub type VirtualAddressOf<Arch> =

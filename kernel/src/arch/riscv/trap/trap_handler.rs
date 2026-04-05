@@ -45,24 +45,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             }
         }
         TrapCause::TimerInterrupt => {
-            ktrace("timer interrupt\n");
-            let current_process = task::get_currently_running_process_mut();
-
-            let nanos = |ticks| ticks * 1_000_000_000 / 10_000_000;
-
-            let current_ticks = Arch::read_current_time();
-
-            // 32ms
-            if nanos(current_ticks) - nanos(current_process.ticks_at_started_running)
-                > 4_000_000 * 8
-            {
-                ktrace("time is up, we are scheduling\n");
-                current_process.state = task::ProcessState::Ready;
-                task::schedule(true);
-            } else {
-                // 4ms
-                Arch::set_timer(4 * 10_000_000 / 1_000 + current_ticks);
-            }
+            task::handle_timer_interrupt();
         }
         TrapCause::Syscall => {
             // This is a syscall, so we move the return program counter to just after the `ecall`

@@ -13,6 +13,8 @@ use crate::arch::{
 pub struct Riscv;
 
 impl Architecture for Riscv {
+    const CPU_HERTZ: usize = 10_000_000;
+
     type Context = Context;
     type MemoryModel = Self;
     type TrapFrame = trap::trap_frame::TrapFrame;

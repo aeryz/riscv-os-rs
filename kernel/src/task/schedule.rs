@@ -1,10 +1,13 @@
 use crate::{
     Arch,
-    arch::{Architecture, ContextOf, MemoryModel},
+    arch::{Architecture, ContextOf, MemoryModel, TrapFrameOf},
     helper::u64_to_str,
-    kdebug,
+    kdebug, ktrace,
     task::{self, Process},
 };
+
+/// Defines how long can a process run on CPU before being scheduled.
+pub const PER_PROCESS_TIME_SLICE_NANOS: usize = 4_000_000 * 8 /* 32 ms */;
 
 static mut SCHEDULER_CTX: Scheduler = Scheduler {
     current_running_proc_idx: 1,
@@ -14,44 +17,59 @@ struct Scheduler {
     current_running_proc_idx: usize,
 }
 
+/// Handles a timer interrupt
+///
+/// Determines whether a timer interrupt should result in scheduling or not.
+pub fn handle_timer_interrupt() {
+    ktrace("timer interrupt\n");
+    let current_process = get_currently_running_process_mut();
+
+    let current_ticks = Arch::read_current_time();
+
+    // If we are running in the idle task, it means we can have sleeping tasks that are
+    // ready to be woken up. So if we are in the idle task and we find any task like that,
+    // we do an early switch to the target.
+    // TODO(aeryz): pid == 0 means the idle task but better create a function to make this
+    // expressive
+    if current_process.pid == 0 {
+        let ctx = unsafe { &mut SCHEDULER_CTX };
+        if let Some(proc) = find_next_available_proc_id(ctx) {
+            crate::kinfo("we are switching\n");
+            switch_to(ctx, proc, true);
+        } else {
+            // 4ms
+            Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + current_ticks);
+        }
+    } else {
+        // 32ms
+        if Arch::ticks_to_nanos(current_ticks)
+            - Arch::ticks_to_nanos(current_process.ticks_at_started_running)
+            >= PER_PROCESS_TIME_SLICE_NANOS
+        {
+            ktrace("time is up, we are scheduling");
+            current_process.state = task::ProcessState::Ready;
+            task::schedule(true);
+        } else {
+            // 4ms
+            Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + current_ticks);
+        }
+    }
+}
+
 pub fn schedule(reset_timer: bool) {
     let mut buf = [0; 20];
 
     let ctx = unsafe { &mut SCHEDULER_CTX };
 
-    let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
-
     match find_next_available_proc_id(ctx) {
         Some(next_proc_id) => {
-            let next_process = task::get_process_at_mut(next_proc_id);
-
-            Arch::set_root_page_table(next_process.root_table);
-
-            next_process.ticks_at_started_running = Arch::read_current_time();
-
-            if reset_timer {
-                // 4ms
-                Arch::set_timer(4 * 10_000_000 / 1_000 + next_process.ticks_at_started_running);
-            }
-
-            next_process.state = crate::ProcessState::Running;
-
             kdebug("current proc: \n\t");
             kdebug(u64_to_str(ctx.current_running_proc_idx as u64, &mut buf));
 
             kdebug("switching to: \n\t");
             kdebug(u64_to_str(next_proc_id as u64, &mut buf));
 
-            if ctx.current_running_proc_idx == next_proc_id {
-                return;
-            }
-
-            ctx.current_running_proc_idx = next_proc_id;
-
-            Arch::switch(
-                (&mut current_process.context) as *mut ContextOf<Arch>,
-                (&next_process.context) as *const ContextOf<Arch>,
-            );
+            switch_to(ctx, next_proc_id, reset_timer);
         }
         None => {
             let idle_process = task::get_process_at_mut(0);
@@ -61,6 +79,8 @@ pub fn schedule(reset_timer: bool) {
             }
             ctx.current_running_proc_idx = 0;
             Arch::set_kernel_sp(0);
+
+            let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
             Arch::switch(
                 (&mut current_process.context) as *mut ContextOf<Arch>,
                 &idle_process.context as *const ContextOf<Arch>,
@@ -77,6 +97,33 @@ pub fn get_currently_running_process() -> &'static Process {
 pub fn get_currently_running_process_mut() -> &'static mut Process {
     let scheduler = unsafe { &SCHEDULER_CTX };
     task::get_process_at_mut(scheduler.current_running_proc_idx)
+}
+
+fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
+    let next_process = task::get_process_at_mut(process_id);
+
+    Arch::set_root_page_table(next_process.root_table);
+
+    next_process.ticks_at_started_running = Arch::read_current_time();
+
+    if reset_timer {
+        // 4ms
+        Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + next_process.ticks_at_started_running);
+    }
+
+    next_process.state = crate::ProcessState::Running;
+
+    if ctx.current_running_proc_idx == process_id {
+        return;
+    }
+
+    ctx.current_running_proc_idx = process_id;
+
+    let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
+    Arch::switch(
+        (&mut current_process.context) as *mut ContextOf<Arch>,
+        (&next_process.context) as *const ContextOf<Arch>,
+    );
 }
 
 fn find_next_available_proc_id(ctx: &Scheduler) -> Option<usize> {
