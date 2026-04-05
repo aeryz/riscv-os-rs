@@ -21,7 +21,7 @@ struct Scheduler {
 ///
 /// Determines whether a timer interrupt should result in scheduling or not.
 pub fn handle_timer_interrupt() {
-    ktrace("timer interrupt\n");
+    kdebug("timer interrupt\n");
     let current_process = get_currently_running_process_mut();
 
     let current_ticks = Arch::read_current_time();
@@ -34,9 +34,10 @@ pub fn handle_timer_interrupt() {
     if current_process.pid == 0 {
         let ctx = unsafe { &mut SCHEDULER_CTX };
         if let Some(proc) = find_next_available_proc_id(ctx) {
-            crate::kinfo("we are switching\n");
+            crate::kdebug("found a suitable task, changing");
             switch_to(ctx, proc, true);
         } else {
+            crate::kdebug("no runable task, idle continues");
             // 4ms
             Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + current_ticks);
         }
@@ -77,10 +78,10 @@ pub fn schedule(reset_timer: bool) {
             if ctx.current_running_proc_idx == 0 {
                 return;
             }
+            let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
             ctx.current_running_proc_idx = 0;
             Arch::set_kernel_sp(0);
 
-            let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
             Arch::switch(
                 (&mut current_process.context) as *mut ContextOf<Arch>,
                 &idle_process.context as *const ContextOf<Arch>,
@@ -117,9 +118,10 @@ fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
         return;
     }
 
+    let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
+
     ctx.current_running_proc_idx = process_id;
 
-    let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
     Arch::switch(
         (&mut current_process.context) as *mut ContextOf<Arch>,
         (&next_process.context) as *const ContextOf<Arch>,
