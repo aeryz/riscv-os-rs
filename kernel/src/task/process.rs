@@ -1,9 +1,11 @@
 use crate::{
     Arch,
     arch::{
-        ContextOf, TrapFrameOf,
-        mmu::{PhysicalAddress, VirtualAddress},
+        Architecture, Context, ContextOf, TrapFrame, TrapFrameOf,
+        mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
     },
+    mm::{self, KERNEL_DIRECT_MAPPING_BASE},
+    task,
 };
 
 pub const PROCESS_TEXT_ADDRESS: VirtualAddress =
@@ -40,4 +42,103 @@ pub enum ProcessState {
     Running,
     Ready,
     Blocked,
+}
+
+/// Creates a kernel process
+pub fn create_kernel_process(entry: VirtualAddress) {
+    let kernel_stack = mm::alloc().unwrap();
+    let kernel_stack_va =
+        VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
+    let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+    let context = ContextOf::<Arch>::initialize(entry, kernel_sp_va);
+
+    task::add_process(Process {
+        pid: 0,
+        kernel_sp: kernel_sp_va.raw(),
+        root_table: PhysicalAddress::ZERO,
+        trap_frame: core::ptr::null_mut(),
+        context,
+        ticks_at_started_running: 0,
+        state: ProcessState::Ready,
+        wake_up_at: 0,
+    });
+}
+
+/// Creates a process and adds it to the process table
+///
+// TODO(aeryz): Note that this is still a temporary implementation because there's no
+// file system or ELF support. We just construct the memory mappings for the process
+// as if it's being loaded from the filesystem.
+pub fn create_process(entry: usize) {
+    // we first initiate user's root page table
+    let process_root_table_pa = mm::alloc().unwrap();
+    let process_root_table_va =
+        VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
+            .unwrap();
+    let process_root_table = process_root_table_va.as_ptr_mut();
+    unsafe { *process_root_table = PageTable::empty() };
+
+    // we don't do heap for now
+    // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
+
+    // Assuming the code is at most 32K
+    for i in 0..8 {
+        unsafe {
+            (*process_root_table).map_vm(
+                VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap(),
+                PhysicalAddress::from_raw_unchecked(
+                    entry as u64 - 0xffff_ffff_0000_0000 + 0x1000 * i,
+                ),
+                PteFlags::RX | PteFlags::U,
+            );
+        }
+    }
+
+    // 16K stack
+    for i in 0..4 {
+        let user_stack = mm::alloc().unwrap();
+
+        unsafe {
+            (*process_root_table).map_vm(
+                VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap(),
+                user_stack,
+                PteFlags::RW | PteFlags::U,
+            )
+        };
+    }
+
+    let kernel_stack = mm::alloc().unwrap();
+    let kernel_stack_va =
+        VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
+
+    unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
+
+    mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
+
+    let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+    let trap_frame_ptr =
+        VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrameOf<Arch>>() as u64)
+            .unwrap();
+    unsafe {
+        *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(
+            task::PROCESS_TEXT_ADDRESS,
+            task::PROCESS_STACK_ADDRESS,
+        );
+    }
+
+    let context = ContextOf::<Arch>::initialize(
+        VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
+        trap_frame_ptr,
+    );
+
+    task::add_process(Process {
+        pid: 0,
+        kernel_sp: kernel_sp_va.raw(),
+        root_table: process_root_table_pa,
+        trap_frame: trap_frame_ptr.as_ptr_mut(),
+        context,
+        ticks_at_started_running: 0,
+        state: ProcessState::Ready,
+        wake_up_at: 0,
+    });
 }

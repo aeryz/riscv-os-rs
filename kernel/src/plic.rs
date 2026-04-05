@@ -2,7 +2,7 @@ use crate::KERNEL_DIRECT_MAPPING_BASE;
 
 pub const UART0_IRQ: u32 = 10;
 
-const PLIC: u64 = 0x0c00_0000 + KERNEL_DIRECT_MAPPING_BASE;
+const PLIC: u64 = 0x0c00_0000 + KERNEL_DIRECT_MAPPING_BASE.raw();
 
 pub const fn plic_priority(irq: u32) -> *mut u32 {
     (PLIC + (irq as u64) * 4) as *mut u32

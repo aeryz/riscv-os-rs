@@ -1,6 +1,21 @@
+use crate::{Arch, UART_PHYSICAL_ADDR, arch::MemoryModel, mm::KERNEL_DIRECT_MAPPING_BASE};
+
 pub const KB: usize = 1 << 10;
 pub const MB: usize = 1 << 20;
 pub const GB: usize = 1 << 30;
+
+pub const DEBUG_LEVEL: DebugLevel = {
+    if let Some(debug_level) = option_env!("DEBUG_LEVEL") {
+        match debug_level.as_bytes()[0] {
+            b'0' => DebugLevel::Trace,
+            b'1' => DebugLevel::Debug,
+            b'2' => DebugLevel::Info,
+            _ => DebugLevel::None,
+        }
+    } else {
+        DebugLevel::None
+    }
+};
 
 pub fn u64_to_str(mut n: u64, buf: &mut [u8]) -> &[u8] {
     if buf.is_empty() {
@@ -62,4 +77,50 @@ pub fn u64_to_str_hex(mut n: u64, buf: &mut [u8]) -> &[u8] {
     i += 1;
 
     &buf[..i]
+}
+
+#[derive(PartialEq, PartialOrd)]
+pub enum DebugLevel {
+    Trace,
+    Debug,
+    Info,
+    None,
+}
+
+pub fn ktrace<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Trace {
+        return;
+    }
+    kprint("[KTRACE] ");
+    kprint(b)
+}
+
+pub fn kdebug<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Debug {
+        return;
+    }
+    kprint("[KDEBUG] ");
+    kprint(b)
+}
+
+pub fn kinfo<T: AsRef<[u8]>>(b: T) {
+    if DEBUG_LEVEL > DebugLevel::Info {
+        return;
+    }
+    kprint("[KINFO] ");
+    kprint(b)
+}
+
+pub fn kprint<T: AsRef<[u8]>>(b: T) {
+    let root = Arch::get_root_page_table();
+
+    let uart_addr = if root == 0 {
+        UART_PHYSICAL_ADDR
+    } else {
+        UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE.raw()
+    };
+
+    b.as_ref()
+        .into_iter()
+        .for_each(|b| unsafe { core::ptr::write_volatile(uart_addr as *mut u8, *b) });
 }

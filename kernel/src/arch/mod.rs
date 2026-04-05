@@ -50,6 +50,8 @@ pub trait MemoryModel {
     type VirtualAddress: Into<usize>;
 
     fn set_root_page_table(pa: Self::PhysicalAddress);
+
+    fn get_root_page_table() -> usize;
 }
 
 pub trait Context<A: Architecture + ?Sized> {

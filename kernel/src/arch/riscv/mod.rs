@@ -4,9 +4,10 @@ pub mod mmu;
 mod trap;
 
 use context::Context;
+use riscv::registers::Satp;
 
 use crate::arch::{
-    Architecture, MemoryModel, PhysicalAddressOf, VirtualAddressOf,
+    Architecture, MemoryModel, VirtualAddressOf,
     mmu::{PhysicalAddress, VirtualAddress},
     riscv::trap::trap::trap_resume,
 };
@@ -78,5 +79,9 @@ impl MemoryModel for Riscv {
 
     fn set_root_page_table(pa: Self::PhysicalAddress) {
         mmu::set_root_page_table(pa);
+    }
+
+    fn get_root_page_table() -> usize {
+        Satp::read().raw() as usize
     }
 }
