@@ -1,16 +1,15 @@
 use crate::{
-    Arch, KERNEL, SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE,
-    arch::{
-        Architecture,
-        riscv::trap::trap_frame::{TrapCause, TrapFrame},
-    },
-    console, ktrace, plic, task,
+    KERNEL,
+    arch::riscv::trap::trap_frame::{TrapCause, TrapFrame},
+    ktrace, plic, syscall, task,
 };
 
 #[unsafe(no_mangle)]
 extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
     // https://docs.riscv.org/reference/isa/priv/supervisor.html#scause
     match trap_frame.get_cause() {
+        // TODO(aeryz): right now, we don't have ISA-independent drivers. Keeping this as is
+        // right now but this is no good.
         TrapCause::ExternalIrq => {
             // TODO: only support the hart = 0
             let interrupt_id = plic::plic_claim(0);
@@ -50,47 +49,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
         TrapCause::Syscall => {
             // This is a syscall, so we move the return program counter to just after the `ecall`
             trap_frame.sepc += 4;
-            let syscall_number = trap_frame.a7;
-            match syscall_number {
-                SYSCALL_WRITE => {
-                    let _fd = trap_frame.get_arg::<0>();
-                    let buf = trap_frame.get_arg::<1>() as *const u8;
-                    let count = trap_frame.get_arg::<2>();
-
-                    let utf8_str = unsafe { core::slice::from_raw_parts(buf, count) };
-
-                    console::print(utf8_str);
-
-                    trap_frame.a0 = count;
-                }
-                SYSCALL_READ => {
-                    let _fd = trap_frame.get_arg::<0>();
-                    let buf = trap_frame.get_arg::<1>() as *mut u8;
-                    let count = trap_frame.get_arg::<2>();
-
-                    let buf = unsafe { core::slice::from_raw_parts_mut(buf, count) };
-
-                    let n_read = syscall_read(buf);
-                    trap_frame.a0 = n_read;
-                }
-                SYSCALL_SLEEP_MS => {
-                    let ms = trap_frame.get_arg::<0>();
-
-                    let current_process = task::get_currently_running_process_mut();
-
-                    let ms_to_ticks = |ms| ms * 10_000_000 / 1_000;
-
-                    current_process.state = crate::task::ProcessState::Sleeping;
-
-                    current_process.wake_up_at = Arch::read_current_time() + ms_to_ticks(ms);
-
-                    task::schedule(false);
-                }
-                SYSCALL_SHUTDOWN => {
-                    crate::halt();
-                }
-                _ => unreachable!(),
-            }
+            syscall::dispatch_syscall(trap_frame);
         }
         TrapCause::Unknown(trap) => {
             crate::kdebug("unhandled trap\n\t");
@@ -105,39 +64,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
                 riscv::registers::Sepc::read().raw(),
                 &mut [0; 32],
             ));
-            unreachable!()
+            panic!();
         }
     }
-}
-
-pub fn syscall_read(buf: &mut [u8]) -> usize {
-    let mut i = 0;
-    while i < buf.len() {
-        loop {
-            match unsafe { crate::UART.try_get_char() } {
-                Some(c) => {
-                    ktrace("read something, not scheduling\n");
-                    if c == b'\n' || c == b'\r' {
-                        return i;
-                    }
-                    buf[i] = c;
-                    i += 1;
-                    break;
-                }
-                None => {
-                    ktrace("couldn't read anything, scheduling\n");
-                    let current_process = task::get_currently_running_process_mut();
-                    current_process.state = task::ProcessState::Blocked;
-                    unsafe {
-                        KERNEL.uart_wait_queue[KERNEL.uart_wait_queue_len] = current_process.pid;
-                        KERNEL.uart_wait_queue_len += 1;
-                    }
-
-                    task::schedule(false);
-                }
-            }
-        }
-    }
-
-    i
 }

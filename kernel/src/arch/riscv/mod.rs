@@ -1,3 +1,4 @@
+mod boot;
 mod context;
 pub mod mmu;
 mod trap;
@@ -5,7 +6,7 @@ mod trap;
 use context::Context;
 
 use crate::arch::{
-    Architecture, MemoryModel,
+    Architecture, MemoryModel, PhysicalAddressOf, VirtualAddressOf,
     mmu::{PhysicalAddress, VirtualAddress},
     riscv::trap::trap::trap_resume,
 };
@@ -41,6 +42,32 @@ impl Architecture for Riscv {
 
     fn trap_resume_ptr() -> *const () {
         trap_resume as *const ()
+    }
+
+    fn enable_interrupts() {
+        riscv::registers::Sstatus::read()
+            .enable_supervisor_interrupts()
+            .write();
+
+        riscv::registers::Sie::empty()
+            .enable_external_interrupts()
+            .enable_timer_interrupt()
+            .write();
+    }
+
+    fn set_trap_handler(handler: usize) {
+        riscv::registers::Stvec::new(handler as u64).write();
+    }
+
+    fn start_usermode(entry: VirtualAddressOf<Self>, user_sp: VirtualAddressOf<Self>) -> ! {
+        riscv::registers::Sstatus::read()
+            .enable_user_mode()
+            .enable_user_page_access()
+            .write();
+
+        riscv::registers::Sepc::new(entry.raw()).write();
+
+        riscv::sret(user_sp.raw());
     }
 }
 

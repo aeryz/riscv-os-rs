@@ -41,22 +41,8 @@ pub struct TrapFrame {
 }
 
 impl TrapFrame {
-    pub fn get_cause(&self) -> TrapCause {
+    pub(super) fn get_cause(&self) -> TrapCause {
         self.scause.into()
-    }
-
-    pub const fn get_arg<const IDX: usize>(&self) -> usize {
-        match IDX {
-            0 => self.a0,
-            1 => self.a1,
-            2 => self.a2,
-            3 => self.a3,
-            4 => self.a4,
-            5 => self.a5,
-            6 => self.a6,
-            7 => self.a7,
-            _ => panic!("invalid"),
-        }
     }
 }
 
@@ -93,5 +79,27 @@ impl arch::TrapFrame<Riscv> for TrapFrame {
                 .raw() as usize,
             ..Default::default()
         }
+    }
+
+    fn get_arg<const I: usize>(&self) -> usize {
+        match I {
+            0 => self.a0,
+            1 => self.a1,
+            2 => self.a2,
+            3 => self.a3,
+            4 => self.a4,
+            5 => self.a5,
+            6 => self.a6,
+            7 => self.a7,
+            _ => panic!("invalid"),
+        }
+    }
+
+    fn get_syscall(&self) -> usize {
+        self.a7
+    }
+
+    fn set_syscall_return_value(&mut self, ret: usize) {
+        self.a0 = ret;
     }
 }

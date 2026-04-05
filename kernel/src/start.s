@@ -9,6 +9,6 @@ _start:
     addi t0, t0, 8
     j    1b
 2:
-    call kmain
+    call bootentry
 
 3:  j 3b

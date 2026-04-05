@@ -14,11 +14,17 @@ pub trait Architecture {
 
     fn set_timer(time: usize);
 
+    fn set_kernel_sp(value: usize);
+
+    fn set_trap_handler(handler: usize);
+
+    fn start_usermode(entry: VirtualAddressOf<Self>, user_sp: VirtualAddressOf<Self>) -> !;
+
+    fn enable_interrupts();
+
     fn read_current_time() -> usize;
 
     fn switch(from: *mut Self::Context, to: *const Self::Context);
-
-    fn set_kernel_sp(value: usize);
 
     fn trap_resume_ptr() -> *const ();
 
@@ -52,4 +58,10 @@ pub trait Context<A: Architecture + ?Sized> {
 
 pub trait TrapFrame<A: Architecture + ?Sized> {
     fn initialize(instruction_ptr: VirtualAddressOf<A>, stack_ptr: VirtualAddressOf<A>) -> Self;
+
+    fn get_syscall(&self) -> usize;
+
+    fn set_syscall_return_value(&mut self, ret: usize);
+
+    fn get_arg<const I: usize>(&self) -> usize;
 }

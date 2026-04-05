@@ -9,10 +9,17 @@ use core::{
 
 use riscv::registers::{Satp, SatpMode};
 
-use crate::{arch::{Architecture, Context, ContextOf, TrapFrame, TrapFrameOf, mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress}}, driver::uart::Uart};
-use crate::helper::*;
+use crate::{arch::MemoryModel, helper::*};
 use crate::{
+    arch::PhysicalAddressOf,
     task::{Process, ProcessState},
+};
+use crate::{
+    arch::{
+        Architecture, Context, ContextOf, TrapFrame, TrapFrameOf,
+        mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
+    },
+    driver::uart::Uart,
 };
 
 #[cfg(feature = "riscv")]
@@ -26,6 +33,7 @@ pub mod driver;
 pub mod helper;
 pub mod mm;
 pub mod plic;
+pub mod syscall;
 pub mod task;
 pub(crate) mod userspace;
 
@@ -37,11 +45,6 @@ unsafe extern "C" {
 }
 
 const UART_PHYSICAL_ADDR: u64 = 0x10000000;
-
-const SYSCALL_WRITE: usize = 1;
-const SYSCALL_READ: usize = 2;
-const SYSCALL_SLEEP_MS: usize = 3;
-const SYSCALL_SHUTDOWN: usize = 4;
 
 const KERNEL_DIRECT_MAPPING_BASE: u64 = 0xffff_ffd6_0000_0000;
 
@@ -128,18 +131,16 @@ impl Kernel {
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
         let context = ContextOf::<Arch>::initialize(entry, kernel_sp_va);
 
-        task::add_process(
-            Process {
-                pid: 0,
-                kernel_sp: kernel_sp_va.raw(),
-                root_table: PhysicalAddress::ZERO,
-                trap_frame: core::ptr::null_mut(),
-                context,
-                ticks_at_started_running: 0,
-                state: ProcessState::Ready,
-                wake_up_at: 0,
-            } 
-        );
+        task::add_process(Process {
+            pid: 0,
+            kernel_sp: kernel_sp_va.raw(),
+            root_table: PhysicalAddress::ZERO,
+            trap_frame: core::ptr::null_mut(),
+            context,
+            ticks_at_started_running: 0,
+            state: ProcessState::Ready,
+            wake_up_at: 0,
+        });
     }
 
     #[inline(never)]
@@ -188,12 +189,20 @@ impl Kernel {
         mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
         let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
-        let trap_frame_ptr = VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrameOf<Arch>>() as u64).unwrap();
+        let trap_frame_ptr =
+            VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrameOf<Arch>>() as u64)
+                .unwrap();
         unsafe {
-            *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(task::PROCESS_TEXT_ADDRESS, task::PROCESS_STACK_ADDRESS);
+            *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(
+                task::PROCESS_TEXT_ADDRESS,
+                task::PROCESS_STACK_ADDRESS,
+            );
         }
 
-        let context = ContextOf::<Arch>::initialize(VirtualAddress::from_raw(Arch::trap_resume_ptr()  as u64).unwrap(), trap_frame_ptr);
+        let context = ContextOf::<Arch>::initialize(
+            VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
+            trap_frame_ptr,
+        );
 
         task::add_process(Process {
             pid: 0,
@@ -205,88 +214,13 @@ impl Kernel {
             state: ProcessState::Ready,
             wake_up_at: 0,
         });
-
-    }
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn kmain(hart_id: u64, dtb_pa: u64) -> ! {
-    kdebug(b"hello world from kernel\n");
-
-    let mut buf = [0; 20];
-    kdebug("hart id: ");
-    kdebug(u64_to_str(hart_id, &mut buf));
-    kdebug("dtb pa: ");
-    kdebug(u64_to_str_hex(dtb_pa, &mut buf));
-
-    let magic = u32::from_be(unsafe { *(dtb_pa as *const u32) });
-    kdebug("magic: ");
-    kdebug(u64_to_str_hex(magic as u64, &mut buf));
-
-    enter_supervisor(supervisor_main_no_virtual_memory as *const () as usize);
-}
-
-#[inline(always)]
-pub fn enter_supervisor(entry: usize) -> ! {
-    // `mret` will jump to `mepc` which is `entry`.
-    riscv::registers::Mepc::new(entry as u64).write();
-    // Enable the supervisor mode so that `mret` starts executing in the S-mode.
-    riscv::registers::Mstatus::read()
-        .enable_supervisor_mode()
-        .write();
-    // Delegate all interrupt handlings to S-mode.
-    riscv::registers::Mideleg::empty().delegate_all().write();
-    riscv::registers::Medeleg::empty().delegate_all().write();
-
-    // Enable access to `rdtime` pseudo-instruction by the S-mode.
-    riscv::registers::Mcounteren::empty()
-        .enable_access_to_time()
-        .write();
-
-    // Enable the `stimecmp` register in S-mode.
-    riscv::registers::Menvcfg::empty().enable_stimecmp().write();
-
-    // Enable access to all memory.
-    // TODO: Idk if we need to do anything here because we already do memory management in the
-    // S-mode. Let's check what Linux does here.
-    riscv::registers::Pmpaddr0::new(0x2fffffffffffffff).write();
-    riscv::registers::Pmpcfg0::empty()
-        .enable_tor()
-        .set_readable()
-        .set_writable()
-        .set_executable()
-        .write();
-
-    // Return to address at `mepc`(entry) and start executing in the mode set in `mstatus`(S-mode)
-    riscv::mret();
-}
-
-/// The entrypoint for when the initial boot phase is done and M-mode switches
-/// to S-mode. Only responsibility here is to setup the kernel virtual memory,
-/// and immediately switch to the higher base kernel code at [`kernel_higher_half_entry`].
-/// Eg. 0x80000000 -> 0xffffffff80000000
-#[unsafe(no_mangle)]
-pub extern "C" fn supervisor_main_no_virtual_memory() -> ! {
-    kdebug(b"hello from the supervisor\n");
-
-    mm::init();
-
-    unsafe {
-        asm!(
-            "li t0, {kernel_offset}",
-            "add t0, t0, {}",
-            "jr t0",
-            in(reg) kernel_higher_half_entry as *const () as u64,
-            kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()), 
-            options(noreturn, nostack, preserves_flags))
     }
 }
 
 /// The actual entry of the kernel. This function assumes that it is running on `S-mode` and the kernel virtual memory
 /// is already initialized. It does all the remaining kernel initializations and switches to the first userspace program.
 /// It does not return because it explicitly jumps to U-mode with `sret`.
-#[unsafe(no_mangle)]
-pub extern "C" fn kernel_higher_half_entry() -> ! {
+pub fn kmain() -> ! {
     let kernel_addr = unsafe { &KERNEL as *const Kernel as u64 };
     let mut buf = [0; 20];
     kdebug(b"kernel is loaded at after paging: ");
@@ -298,68 +232,26 @@ pub extern "C" fn kernel_higher_half_entry() -> ! {
     }
 
     unsafe {
-        KERNEL.create_kernel_process(VirtualAddress::from_raw(idle_task as *const () as u64).unwrap());
+        KERNEL.create_kernel_process(
+            VirtualAddress::from_raw(idle_task as *const () as u64).unwrap(),
+        );
         KERNEL.create_process(userspace::shell::shell as *const () as u64);
         KERNEL.create_process(userspace::userspace_sleep_print_loop as *const () as u64);
     };
 
     let process = task::get_process_at(1);
 
-    enter_usermode(
-        task::PROCESS_TEXT_ADDRESS.raw(),
-        trap_entry as *const () as u64,
-        task::PROCESS_STACK_ADDRESS.raw(),
-        process.kernel_sp,
-        process.root_table.raw(),
-    );
-}
+    Arch::set_root_page_table(process.root_table);
 
-#[inline(never)]
-pub fn enter_usermode(
-    entry: u64,
-    trap_handler: u64,
-    user_stack: u64,
-    kernel_stack: u64,
-    user_root_table_pa: u64,
-) -> ! {
-    let kernel_satp = Satp::read();
+    Arch::set_trap_handler(trap_entry as *const () as u64 as usize);
 
-    riscv::write_satp(
-        Satp::empty()
-            .set_mode(SatpMode::Sv39)
-            .set_ppn(user_root_table_pa),
-    );
+    Arch::set_kernel_sp(process.kernel_sp as usize);
 
-    riscv::registers::Sepc::new(entry).write();
+    let time = Arch::read_current_time();
+    Arch::set_timer(time + Arch::nanos_to_ticks(8 * 1_000_000));
 
-    riscv::registers::Sstatus::read()
-        .enable_user_mode()
-        .enable_supervisor_interrupts()
-        .enable_user_page_access()
-        .write();
-
-    riscv::registers::Stvec::new(trap_handler).write();
-
-    unsafe {
-        *(kernel_stack as *mut u64) = kernel_satp.raw();
-    }
-
-    riscv::registers::Sscratch::new(kernel_stack).write();
-
-    const TIMER_FREQ: u64 = 10_000_000;
-
-    fn ms_to_ticks(ms: u64) -> u64 {
-        ms * TIMER_FREQ / 1000
-    }
-
-    let time = riscv::registers::Time::read().raw();
-    riscv::registers::Stimecmp::new(time + ms_to_ticks(8)).write();
-    riscv::registers::Sie::empty()
-        .enable_external_interrupts()
-        .enable_timer_interrupt()
-        .write();
-
-    riscv::sret(user_stack);
+    Arch::enable_interrupts();
+    Arch::start_usermode(task::PROCESS_TEXT_ADDRESS, task::PROCESS_STACK_ADDRESS);
 }
 
 #[unsafe(no_mangle)]

@@ -1,6 +1,6 @@
 use crate::{
     Arch,
-    arch::{Architecture, ContextOf, MemoryModel, TrapFrameOf},
+    arch::{Architecture, ContextOf, MemoryModel},
     helper::u64_to_str,
     kdebug, ktrace,
     task::{self, Process},

@@ -1,6 +1,6 @@
 use core::arch::asm;
 
-use crate::{SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE};
+use crate::syscall::{SYSCALL_READ, SYSCALL_SHUTDOWN, SYSCALL_SLEEP_MS, SYSCALL_WRITE};
 
 pub fn write(data_ptr: *const u8, len: usize) -> isize {
     let ret: isize;
