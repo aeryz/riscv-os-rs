@@ -3,7 +3,7 @@ use crate::{
     arch::{Architecture, ContextOf, MemoryModel},
     helper::u64_to_str,
     kdebug, ktrace,
-    task::{self, Process, TASK_PID_IDLE},
+    task::{self, Process, TASK_PID_IDLE, TASK_PID_REAPER},
 };
 
 /// Defines how long can a process run on CPU before being scheduled.
@@ -64,6 +64,16 @@ pub fn schedule(reset_timer: bool) {
     let ctx = unsafe { &mut SCHEDULER_CTX };
 
     match find_next_available_proc_id(ctx) {
+        Some(TASK_PID_REAPER) => {
+            let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
+            let reaper_process = task::get_process_at_mut(TASK_PID_REAPER);
+            reaper_process.state = task::ProcessState::Blocked;
+            Arch::set_kernel_sp(0);
+            Arch::switch(
+                (&mut current_process.context) as *mut ContextOf<Arch>,
+                &reaper_process.context as *const ContextOf<Arch>,
+            );
+        }
         Some(next_proc_id) => {
             kdebug("current proc: \n\t");
             kdebug(u64_to_str(ctx.current_running_proc_idx as u64, &mut buf));
