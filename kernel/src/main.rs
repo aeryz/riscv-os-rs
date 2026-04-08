@@ -44,6 +44,8 @@ pub static EARLY_UART: Uart = Uart::new(UART_PHYSICAL_ADDR as usize);
 pub static mut UART: Uart =
     Uart::new((UART_PHYSICAL_ADDR + KERNEL_DIRECT_MAPPING_BASE.raw()) as usize);
 
+// TODO(aeryz): this is ugly, when we are done with splitting into subsystems, we won't
+// have any kernel struct
 pub static mut KERNEL: Kernel = Kernel {
     // TODO: temporary queue to store the processes that are blocked by the uart
     uart_wait_queue: [0; 16],
@@ -76,7 +78,7 @@ pub fn kmain() -> ! {
 
     let process = task::get_process_at(1);
 
-    Arch::set_root_page_table(process.root_table);
+    Arch::set_root_page_table(process.address_space.root_pt);
 
     Arch::set_trap_handler(trap_entry as *const () as u64 as usize);
 

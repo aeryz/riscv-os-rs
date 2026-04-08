@@ -20,6 +20,13 @@ pub fn alloc() -> Result<PhysicalAddress, ()> {
     unsafe { ALLOCATOR.get_mut().unwrap().alloc() }
 }
 
+/// Free a single 4k page.
+pub fn free(ptr: PhysicalAddress) {
+    unsafe {
+        ALLOCATOR.get_mut().unwrap().free(ptr);
+    }
+}
+
 /// Dumb allocator
 ///
 /// Starting from the `start_addr`, support 64 * N pages.
@@ -64,5 +71,13 @@ impl<const N: usize> Allocator<N> {
         }
 
         Err(())
+    }
+
+    fn free(&mut self, ptr: PhysicalAddress) {
+        let x = (ptr.raw() - self.start_addr.raw()) / 4096;
+        let page_i = x / 64;
+        let i = x % 64;
+
+        self.pages[page_i as usize] &= !(1 << i);
     }
 }

@@ -6,6 +6,7 @@ const PROMPT: &[u8] = b"shell $ ";
 
 const CMD_HELP: &[u8] = b"help";
 const CMD_SHUTDOWN: &[u8] = b"shutdown";
+const CMD_EXIT: &[u8] = b"exit";
 
 #[unsafe(no_mangle)]
 pub extern "C" fn shell() {
@@ -55,6 +56,9 @@ pub extern "C" fn shell() {
             }
             CMD_SHUTDOWN => {
                 syscalls::shutdown();
+            }
+            CMD_EXIT => {
+                syscalls::exit(0);
             }
             binary => {
                 let msg = "shell: command not found: ";

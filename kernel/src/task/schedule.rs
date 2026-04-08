@@ -103,7 +103,7 @@ pub fn get_currently_running_process_mut() -> &'static mut Process {
 fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
     let next_process = task::get_process_at_mut(process_id);
 
-    Arch::set_root_page_table(next_process.root_table);
+    Arch::set_root_page_table(next_process.address_space.root_pt);
 
     next_process.ticks_at_started_running = Arch::read_current_time();
 
@@ -142,14 +142,13 @@ fn find_next_available_proc_id(ctx: &Scheduler) -> Option<usize> {
                     return Some(proc.pid);
                 }
             }
-            crate::task::ProcessState::Running => {}
             crate::task::ProcessState::Ready => {
                 crate::ktrace("going to run: \n");
                 let mut buf = [0; 20];
                 crate::ktrace(u64_to_str(proc.pid as u64, &mut buf));
                 return Some(proc.pid);
             }
-            crate::task::ProcessState::Blocked => {}
+            _ => {}
         }
     }
 

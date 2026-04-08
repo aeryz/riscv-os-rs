@@ -7,7 +7,9 @@ use crate::{
 pub const SYSCALL_WRITE: usize = 1;
 pub const SYSCALL_READ: usize = 2;
 pub const SYSCALL_SLEEP_MS: usize = 3;
+// TODO(aeryz): this is not supposed to be a syscall. It's here for convenience only.
 pub const SYSCALL_SHUTDOWN: usize = 4;
+pub const SYSCALL_EXIT: usize = 5;
 
 // TODO(aeryz): We don't want to implement the syscalls here. But they should directly be implemented
 // in their respective subsystem.
@@ -51,6 +53,13 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
         }
         SYSCALL_SHUTDOWN => {
             crate::halt();
+        }
+        SYSCALL_EXIT => {
+            let current_process = task::get_currently_running_process_mut();
+
+            task::exit_process(current_process, tf.get_arg::<0>() as i32);
+
+            task::schedule(false);
         }
         _ => unreachable!(),
     }

@@ -29,6 +29,24 @@ impl PageTable {
         self.map_memory_with_base(va, pa, flags, KERNEL_DIRECT_MAPPING_BASE.raw() as usize);
     }
 
+    pub fn translate(&self, va: VirtualAddress) -> Option<PhysicalAddress> {
+        let l1_pt = (self.0[va.vpn_2()].physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
+            as *const PageTable;
+
+        let l0_pt = unsafe {
+            ((*l1_pt).0[va.vpn_1()].physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
+                as *const PageTable
+        };
+
+        let l0_entry = unsafe { (*l0_pt).0.get_unchecked(va.vpn_0()) };
+
+        if l0_entry.is_valid() {
+            Some(l0_entry.physical_address())
+        } else {
+            None
+        }
+    }
+
     fn map_memory_with_base(
         &mut self,
         va: VirtualAddress,
@@ -49,6 +67,10 @@ impl PageTable {
                 .set_flags(flags | PteFlags::V | PteFlags::A | PteFlags::D)
                 .set_physical_address(pa);
         }
+    }
+
+    fn get_next_table(pte: &PageTableEntry, base: usize) -> *const PageTable {
+        (pte.physical_address().raw() + base as u64) as *const PageTable
     }
 
     fn get_or_create_next_table(pte: &mut PageTableEntry, base: usize) -> *mut PageTable {
