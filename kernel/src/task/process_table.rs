@@ -24,10 +24,12 @@ impl ProcessTable {
     }
 }
 
-pub fn add_process(mut process: Process) {
+pub fn add_process(mut process: Process) -> usize {
     let table = unsafe { &mut PROC_TABLE };
-    process.pid = table.head;
+    let head = table.head;
+    process.pid = head;
     table.new_process(process);
+    head
 }
 
 pub fn get_process_at(index: usize) -> &'static Process {

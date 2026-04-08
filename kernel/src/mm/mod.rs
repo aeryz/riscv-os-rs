@@ -22,7 +22,7 @@ pub const ADDRESS_SPACE_EMPTY: AddressSpace = AddressSpace {
 pub struct VmRegion {
     pub start: VirtualAddressOf<Arch>,
     pub end: VirtualAddressOf<Arch>,
-    // TODO(aeryz): Add flags
+    pub process_owned: bool,
 }
 
 #[derive(Clone)]

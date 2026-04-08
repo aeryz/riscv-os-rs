@@ -38,13 +38,15 @@ pub struct Process {
     pub address_space: AddressSpace,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 #[repr(C)]
 pub enum ProcessState {
     Sleeping,
     Running,
     Ready,
     Blocked,
+    /// This task cannot run anymore, but it's address space is not freed also.
+    Zombie,
     Exited,
 }
 
@@ -74,7 +76,7 @@ pub fn create_kernel_process(entry: VirtualAddress) {
 // TODO(aeryz): Note that this is still a temporary implementation because there's no
 // file system or ELF support. We just construct the memory mappings for the process
 // as if it's being loaded from the filesystem.
-pub fn create_process(entry: usize) {
+pub fn create_process(entry: usize) -> usize {
     // we first initiate user's root page table
     let process_root_table_pa = mm::alloc().unwrap();
     let process_root_table_va =
@@ -105,6 +107,7 @@ pub fn create_process(entry: usize) {
         address_space.regions[i_region] = Some(mm::VmRegion {
             start: va,
             end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
+            process_owned: false,
         });
         i_region += 1;
     }
@@ -118,6 +121,7 @@ pub fn create_process(entry: usize) {
         address_space.regions[i_region] = Some(mm::VmRegion {
             start: va,
             end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
+            process_owned: true,
         });
         i_region += 1;
     }
@@ -129,6 +133,7 @@ pub fn create_process(entry: usize) {
     address_space.regions[i_region] = Some(mm::VmRegion {
         start: kernel_stack_va,
         end: VirtualAddress::from_raw(kernel_stack_va.raw() + 4096).unwrap(),
+        process_owned: true,
     });
 
     unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
@@ -161,17 +166,24 @@ pub fn create_process(entry: usize) {
         wake_up_at: 0,
         exit_code: -1,
         address_space,
-    });
+    })
 }
 
 pub fn exit_process(process: &mut Process, exit_code: i32) {
-    process.state = crate::task::ProcessState::Exited;
+    process.state = task::ProcessState::Zombie;
     process.exit_code = exit_code;
+
+    task::get_process_at_mut(task::TASK_PID_REAPER).state = task::ProcessState::Ready;
+}
+
+pub fn reap_process(process: &mut Process) {
+    process.state = crate::task::ProcessState::Exited;
 
     // SAFETY:
     // All the valid processes have root page table
     let root_table = unsafe {
-        (process.address_space.root_pt.raw() as *const PageTable)
+        ((process.address_space.root_pt.raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
+            as *const PageTable)
             .as_ref()
             .unwrap()
     };
@@ -181,12 +193,17 @@ pub fn exit_process(process: &mut Process, exit_code: i32) {
         .regions
         .iter()
         .filter_map(|r| r.as_ref())
+        .filter(|r| r.process_owned)
         .for_each(|r| {
             let mut i = r.start;
             while i.raw() < r.end.raw() {
+                crate::kprint("handling: ");
+                crate::kprint(crate::u64_to_str_hex(i.raw(), &mut [0; 20]));
                 let pa = root_table
                     .translate(i)
                     .expect("All the virtual addresses in an address space must be valid");
+                crate::kprint("translated to: ");
+                crate::kprint(crate::u64_to_str_hex(pa.raw(), &mut [0; 20]));
 
                 mm::free(pa);
 

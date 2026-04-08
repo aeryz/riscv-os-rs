@@ -3,25 +3,28 @@ use crate::{
     arch::{Architecture, ContextOf, MemoryModel},
     helper::u64_to_str,
     kdebug, ktrace,
-    task::{self, Process},
+    task::{self, Process, TASK_PID_IDLE},
 };
 
 /// Defines how long can a process run on CPU before being scheduled.
 pub const PER_PROCESS_TIME_SLICE_NANOS: usize = 4_000_000 * 8 /* 32 ms */;
 
 static mut SCHEDULER_CTX: Scheduler = Scheduler {
-    current_running_proc_idx: 1,
+    current_running_proc_idx: 0,
 };
 
 struct Scheduler {
     current_running_proc_idx: usize,
 }
 
+pub fn init_scheduler(initial_proc_pid: usize) {
+    unsafe { SCHEDULER_CTX.current_running_proc_idx = initial_proc_pid }
+}
+
 /// Handles a timer interrupt
 ///
 /// Determines whether a timer interrupt should result in scheduling or not.
 pub fn handle_timer_interrupt() {
-    kdebug("timer interrupt\n");
     let current_process = get_currently_running_process_mut();
 
     let current_ticks = Arch::read_current_time();
@@ -29,15 +32,13 @@ pub fn handle_timer_interrupt() {
     // If we are running in the idle task, it means we can have sleeping tasks that are
     // ready to be woken up. So if we are in the idle task and we find any task like that,
     // we do an early switch to the target.
-    // TODO(aeryz): pid == 0 means the idle task but better create a function to make this
-    // expressive
-    if current_process.pid == 0 {
+    if current_process.pid == TASK_PID_IDLE {
         let ctx = unsafe { &mut SCHEDULER_CTX };
         if let Some(proc) = find_next_available_proc_id(ctx) {
-            crate::kdebug("found a suitable task, changing");
+            crate::ktrace("found a suitable task, changing");
             switch_to(ctx, proc, true);
         } else {
-            crate::kdebug("no runable task, idle continues");
+            crate::ktrace("no ready task, idle continues");
             // 4ms
             Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + current_ticks);
         }
@@ -73,13 +74,13 @@ pub fn schedule(reset_timer: bool) {
             switch_to(ctx, next_proc_id, reset_timer);
         }
         None => {
-            let idle_process = task::get_process_at_mut(0);
+            let idle_process = task::get_process_at_mut(TASK_PID_IDLE);
             idle_process.ticks_at_started_running = Arch::read_current_time();
-            if ctx.current_running_proc_idx == 0 {
+            if ctx.current_running_proc_idx == TASK_PID_IDLE {
                 return;
             }
             let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
-            ctx.current_running_proc_idx = 0;
+            ctx.current_running_proc_idx = TASK_PID_IDLE;
             Arch::set_kernel_sp(0);
 
             Arch::switch(
@@ -132,7 +133,7 @@ fn find_next_available_proc_id(ctx: &Scheduler) -> Option<usize> {
     let time = Arch::read_current_time();
 
     for proc in task::iterate_process_table_mut(ctx.current_running_proc_idx) {
-        if proc.pid == 0 {
+        if proc.pid == TASK_PID_IDLE {
             continue;
         }
         match proc.state {

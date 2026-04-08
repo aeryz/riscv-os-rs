@@ -111,6 +111,10 @@ pub fn kinfo<T: AsRef<[u8]>>(b: T) {
     kprint(b)
 }
 
+pub fn kfatal<T: AsRef<[u8]>>(b: T) {
+    kprint(b)
+}
+
 pub fn kprint<T: AsRef<[u8]>>(b: T) {
     let root = Arch::get_root_page_table();
 

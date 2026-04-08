@@ -1,5 +1,5 @@
 use crate::arch::mmu::{PageTableEntry, PteFlags, VirtualAddress};
-use crate::mm::{KERNEL_DIRECT_MAPPING_BASE, alloc};
+use crate::mm::{self, KERNEL_DIRECT_MAPPING_BASE};
 
 use super::PhysicalAddress;
 
@@ -32,6 +32,14 @@ impl PageTable {
     pub fn translate(&self, va: VirtualAddress) -> Option<PhysicalAddress> {
         let l1_pt = (self.0[va.vpn_2()].physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
             as *const PageTable;
+
+        crate::kprint("l1_pt: ");
+        crate::kprint(crate::u64_to_str_hex(l1_pt as u64, &mut [0; 20]));
+        crate::kprint("l1_raw: ");
+        crate::kprint(crate::u64_to_str_hex(
+            self.0[va.vpn_2()].physical_address().raw(),
+            &mut [0; 20],
+        ));
 
         let l0_pt = unsafe {
             ((*l1_pt).0[va.vpn_1()].physical_address().raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
@@ -69,16 +77,12 @@ impl PageTable {
         }
     }
 
-    fn get_next_table(pte: &PageTableEntry, base: usize) -> *const PageTable {
-        (pte.physical_address().raw() + base as u64) as *const PageTable
-    }
-
     fn get_or_create_next_table(pte: &mut PageTableEntry, base: usize) -> *mut PageTable {
         if pte.is_valid() {
             return (pte.physical_address().raw() + base as u64) as *mut PageTable;
         }
 
-        let pa = alloc().unwrap();
+        let pa = mm::alloc().unwrap();
         let va = VirtualAddress::from_raw(pa.raw() + base as u64).unwrap();
         let page_table_ptr = va.as_ptr_mut();
         unsafe {

@@ -73,10 +73,15 @@ pub fn kmain() -> ! {
     }
 
     task::create_kernel_process(VirtualAddress::from_raw(idle_task as *const () as u64).unwrap());
-    task::create_process(userspace::shell::shell as *const () as usize);
-    task::create_process(userspace::userspace_sleep_print_loop as *const () as usize);
+    task::create_kernel_process(VirtualAddress::from_raw(reaper_task as *const () as u64).unwrap());
+    task::get_process_at_mut(task::TASK_PID_REAPER).state = ProcessState::Blocked;
 
-    let process = task::get_process_at(1);
+    let init_proc_pid = task::create_process(userspace::shell::shell as *const () as usize);
+    let _ = task::create_process(userspace::userspace_sleep_print_loop as *const () as usize);
+
+    let process = task::get_process_at(init_proc_pid);
+
+    task::init_scheduler(process.pid);
 
     Arch::set_root_page_table(process.address_space.root_pt);
 
@@ -103,6 +108,19 @@ extern "C" fn idle_task() {
         unsafe {
             asm!("wfi");
         }
+    }
+}
+
+#[unsafe(no_mangle)]
+#[inline(never)]
+extern "C" fn reaper_task() {
+    loop {
+        kprint("got here brutha\n");
+        task::iterate_process_table_mut(0)
+            .filter(|p| p.state == task::ProcessState::Zombie)
+            .for_each(|p| task::reap_process(p));
+
+        task::schedule(false);
     }
 }
 

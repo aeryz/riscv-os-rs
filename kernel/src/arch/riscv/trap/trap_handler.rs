@@ -52,15 +52,15 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             syscall::dispatch_syscall(trap_frame);
         }
         TrapCause::Unknown(trap) => {
-            crate::kdebug("unhandled trap\n\t");
-            crate::kdebug(crate::u64_to_str(trap as u64, &mut [0; 20]));
-            crate::kdebug("stval: \n\t");
-            crate::kdebug(crate::u64_to_str_hex(
+            crate::kfatal("unhandled trap: ");
+            crate::kfatal(crate::u64_to_str(trap as u64, &mut [0; 20]));
+            crate::kfatal("stval: ");
+            crate::kfatal(crate::u64_to_str_hex(
                 riscv::registers::Stval::read().raw(),
                 &mut [0; 32],
             ));
-            crate::kdebug("sepc: \n\t");
-            crate::kdebug(crate::u64_to_str_hex(
+            crate::kfatal("sepc: ");
+            crate::kfatal(crate::u64_to_str_hex(
                 riscv::registers::Sepc::read().raw(),
                 &mut [0; 32],
             ));
