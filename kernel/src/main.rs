@@ -76,7 +76,11 @@ pub fn kmain() -> ! {
     task::create_kernel_process(VirtualAddress::from_raw(reaper_task as *const () as u64).unwrap());
     task::get_process_at_mut(task::TASK_PID_REAPER).state = ProcessState::Blocked;
 
+    crate::kprint("Before creation\n");
+
     let init_proc_pid = task::create_process(userspace::shell::shell as *const () as usize);
+    crate::kprint("After creation\n");
+
     let _ = task::create_process(userspace::userspace_sleep_print_loop as *const () as usize);
 
     let process = task::get_process_at(init_proc_pid);

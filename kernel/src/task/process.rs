@@ -126,24 +126,29 @@ pub fn create_process(entry: usize) -> usize {
         i_region += 1;
     }
 
-    let kernel_stack = mm::alloc().unwrap();
-    let kernel_stack_va =
-        VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
+    let (kernel_stack_pa, kernel_stack_va) = {
+        let kernel_stack = mm::alloc().unwrap();
+        let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000).unwrap();
 
-    address_space.regions[i_region] = Some(mm::VmRegion {
-        start: kernel_stack_va,
-        end: VirtualAddress::from_raw(kernel_stack_va.raw() + 4096).unwrap(),
-        process_owned: true,
-    });
+        address_space.regions[i_region] = Some(mm::VmRegion {
+            start: kernel_stack_va,
+            end: VirtualAddress::from_raw(kernel_stack_va.raw() + 4096).unwrap(),
+            process_owned: true,
+        });
 
-    unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
+        unsafe { (*process_root_table).map_vm_debug(kernel_stack_va, kernel_stack, PteFlags::RW) };
 
-    mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
+        (kernel_stack, kernel_stack_va)
+    };
 
-    let kernel_sp_va = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
-    let trap_frame_ptr =
-        VirtualAddress::from_raw(kernel_sp_va.raw() - size_of::<TrapFrameOf<Arch>>() as u64)
-            .unwrap();
+    let kernel_view_of_the_users_kernel_stack =
+        kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0x3fa;
+
+    let trap_frame_ptr = VirtualAddress::from_raw(
+        kernel_view_of_the_users_kernel_stack - size_of::<TrapFrameOf<Arch>>() as u64,
+    )
+    .unwrap();
+
     unsafe {
         *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(
             task::PROCESS_TEXT_ADDRESS,
@@ -153,12 +158,17 @@ pub fn create_process(entry: usize) -> usize {
 
     let context = ContextOf::<Arch>::initialize(
         VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
-        trap_frame_ptr,
+        VirtualAddress::from_raw(
+            kernel_stack_va.raw() + 0x3fa - size_of::<TrapFrameOf<Arch>>() as u64,
+        )
+        .unwrap(),
     );
+
+    mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
     task::add_process(Process {
         pid: 0,
-        kernel_sp: kernel_sp_va.raw(),
+        kernel_sp: 0x0000_0000_4fff_0000 + 0x3fa,
         trap_frame: trap_frame_ptr.as_ptr_mut(),
         context,
         ticks_at_started_running: 0,
@@ -187,6 +197,18 @@ pub fn reap_process(process: &mut Process) {
             .as_ref()
             .unwrap()
     };
+
+    crate::kprint("[ADDRESS SPACE OF PID] ");
+    crate::kprint(crate::u64_to_str(process.pid as u64, &mut [0; 20]));
+    process
+        .address_space
+        .regions
+        .iter()
+        .filter_map(|r| r.as_ref())
+        .for_each(|r| {
+            crate::kprint("\tStart >> ");
+            crate::kprint(crate::u64_to_str_hex(r.start.raw(), &mut [0; 20]));
+        });
 
     process
         .address_space

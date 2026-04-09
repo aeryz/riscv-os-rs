@@ -25,14 +25,14 @@ pub fn init_scheduler(initial_proc_pid: usize) {
 ///
 /// Determines whether a timer interrupt should result in scheduling or not.
 pub fn handle_timer_interrupt() {
-    let current_process = get_currently_running_process_mut();
+    let current_process_pid = get_currently_running_process().pid;
 
     let current_ticks = Arch::read_current_time();
 
     // If we are running in the idle task, it means we can have sleeping tasks that are
     // ready to be woken up. So if we are in the idle task and we find any task like that,
     // we do an early switch to the target.
-    if current_process.pid == TASK_PID_IDLE {
+    if current_process_pid == TASK_PID_IDLE {
         let ctx = unsafe { &mut SCHEDULER_CTX };
         if let Some(proc) = find_next_available_proc_id(ctx) {
             crate::ktrace("found a suitable task, changing");
@@ -45,11 +45,11 @@ pub fn handle_timer_interrupt() {
     } else {
         // 32ms
         if Arch::ticks_to_nanos(current_ticks)
-            - Arch::ticks_to_nanos(current_process.ticks_at_started_running)
+            - Arch::ticks_to_nanos(get_currently_running_process().ticks_at_started_running)
             >= PER_PROCESS_TIME_SLICE_NANOS
         {
             ktrace("time is up, we are scheduling");
-            current_process.state = task::ProcessState::Ready;
+            get_currently_running_process_mut().state = task::ProcessState::Ready;
             task::schedule(true);
         } else {
             // 4ms
@@ -112,21 +112,25 @@ pub fn get_currently_running_process_mut() -> &'static mut Process {
 }
 
 fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
-    let next_process = task::get_process_at_mut(process_id);
+    {
+        let next_process = task::get_process_at_mut(process_id);
 
-    Arch::set_root_page_table(next_process.address_space.root_pt);
+        Arch::set_root_page_table(next_process.address_space.root_pt);
 
-    next_process.ticks_at_started_running = Arch::read_current_time();
+        next_process.ticks_at_started_running = Arch::read_current_time();
 
-    if reset_timer {
-        // 4ms
-        Arch::set_timer(Arch::nanos_to_ticks(4_000_000) + next_process.ticks_at_started_running);
-    }
+        if reset_timer {
+            // 4ms
+            Arch::set_timer(
+                Arch::nanos_to_ticks(4_000_000) + next_process.ticks_at_started_running,
+            );
+        }
 
-    next_process.state = crate::ProcessState::Running;
+        next_process.state = crate::ProcessState::Running;
 
-    if ctx.current_running_proc_idx == process_id {
-        return;
+        if ctx.current_running_proc_idx == process_id {
+            return;
+        }
     }
 
     let current_process = task::get_process_at_mut(ctx.current_running_proc_idx);
@@ -135,7 +139,7 @@ fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
 
     Arch::switch(
         (&mut current_process.context) as *mut ContextOf<Arch>,
-        (&next_process.context) as *const ContextOf<Arch>,
+        (&task::get_process_at(process_id).context) as *const ContextOf<Arch>,
     );
 }
 
