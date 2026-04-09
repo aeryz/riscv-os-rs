@@ -7,7 +7,7 @@ use context::Context;
 use riscv::registers::Satp;
 
 use crate::arch::{
-    Architecture, MemoryModel, VirtualAddressOf,
+    Architecture, MemoryModel, PhysicalAddressOf, VirtualAddressOf,
     mmu::{PhysicalAddress, VirtualAddress},
     riscv::trap::trap::trap_resume,
 };
@@ -34,6 +34,16 @@ impl Architecture for Riscv {
     fn switch(from: *mut Self::Context, to: *const Self::Context) {
         unsafe {
             context::swtch(from, to);
+        }
+    }
+
+    fn switch_to_user(
+        from: *mut Self::Context,
+        to: *const Self::Context,
+        root_pt: PhysicalAddressOf<Self>,
+    ) {
+        unsafe {
+            context::swtch_to_user(from, to, mmu::pa_to_satp(root_pt));
         }
     }
 

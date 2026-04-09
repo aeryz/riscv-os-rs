@@ -126,7 +126,7 @@ pub fn create_process(entry: usize) -> usize {
         i_region += 1;
     }
 
-    let (kernel_stack_pa, kernel_stack_va) = {
+    let kernel_stack_pa = {
         let kernel_stack = mm::alloc().unwrap();
         let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000).unwrap();
 
@@ -138,7 +138,7 @@ pub fn create_process(entry: usize) -> usize {
 
         unsafe { (*process_root_table).map_vm_debug(kernel_stack_va, kernel_stack, PteFlags::RW) };
 
-        (kernel_stack, kernel_stack_va)
+        kernel_stack
     };
 
     let kernel_view_of_the_users_kernel_stack =
@@ -158,17 +158,15 @@ pub fn create_process(entry: usize) -> usize {
 
     let context = ContextOf::<Arch>::initialize(
         VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
-        VirtualAddress::from_raw(
-            kernel_stack_va.raw() + 0x3fa - size_of::<TrapFrameOf<Arch>>() as u64,
-        )
-        .unwrap(),
+        VirtualAddress::from_raw(0x0000_0000_4fff_03fa - size_of::<TrapFrameOf<Arch>>() as u64)
+            .unwrap(),
     );
 
     mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
     task::add_process(Process {
         pid: 0,
-        kernel_sp: 0x0000_0000_4fff_0000 + 0x3fa,
+        kernel_sp: 0x0000_0000_4fff_03fa,
         trap_frame: trap_frame_ptr.as_ptr_mut(),
         context,
         ticks_at_started_running: 0,

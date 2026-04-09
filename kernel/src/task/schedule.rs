@@ -36,7 +36,7 @@ pub fn handle_timer_interrupt() {
         let ctx = unsafe { &mut SCHEDULER_CTX };
         if let Some(proc) = find_next_available_proc_id(ctx) {
             crate::ktrace("found a suitable task, changing");
-            switch_to(ctx, proc, true);
+            switch_to_user_process(ctx, proc, true);
         } else {
             crate::ktrace("no ready task, idle continues");
             // 4ms
@@ -81,7 +81,7 @@ pub fn schedule(reset_timer: bool) {
             kdebug("switching to: \n\t");
             kdebug(u64_to_str(next_proc_id as u64, &mut buf));
 
-            switch_to(ctx, next_proc_id, reset_timer);
+            switch_to_user_process(ctx, next_proc_id, reset_timer);
         }
         None => {
             let idle_process = task::get_process_at_mut(TASK_PID_IDLE);
@@ -111,11 +111,9 @@ pub fn get_currently_running_process_mut() -> &'static mut Process {
     task::get_process_at_mut(scheduler.current_running_proc_idx)
 }
 
-fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
+fn switch_to_user_process(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
     {
         let next_process = task::get_process_at_mut(process_id);
-
-        Arch::set_root_page_table(next_process.address_space.root_pt);
 
         next_process.ticks_at_started_running = Arch::read_current_time();
 
@@ -137,9 +135,10 @@ fn switch_to(ctx: &mut Scheduler, process_id: usize, reset_timer: bool) {
 
     ctx.current_running_proc_idx = process_id;
 
-    Arch::switch(
+    Arch::switch_to_user(
         (&mut current_process.context) as *mut ContextOf<Arch>,
         (&task::get_process_at(process_id).context) as *const ContextOf<Arch>,
+        task::get_process_at(process_id).address_space.root_pt,
     );
 }
 

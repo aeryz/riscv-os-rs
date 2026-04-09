@@ -26,6 +26,12 @@ pub trait Architecture {
 
     fn switch(from: *mut Self::Context, to: *const Self::Context);
 
+    fn switch_to_user(
+        from: *mut Self::Context,
+        to: *const Self::Context,
+        root_pt: PhysicalAddressOf<Self>,
+    );
+
     fn trap_resume_ptr() -> *const ();
 
     fn ticks_to_nanos(ticks: usize) -> usize {

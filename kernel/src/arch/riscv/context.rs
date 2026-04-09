@@ -3,6 +3,7 @@ use core::arch::global_asm;
 use crate::arch::{self, Riscv, VirtualAddressOf};
 
 unsafe extern "C" {
+    pub fn swtch_to_user(from: *mut Context, to: *const Context, satp: usize);
     pub fn swtch(from: *mut Context, to: *const Context);
 }
 
@@ -10,10 +11,14 @@ unsafe extern "C" {
 // a1: context ptr to
 global_asm!(
     r#"
+    .section .text.swtch_to_user
+    .globl swtch_to_user
+swtch_to_user:
+    csrw satp, a2
+    sfence.vma zero, zero
+
     .section .text.swtch
     .globl swtch
-    .align 2
-
 swtch:
     sd ra,   0*8(a0)
     sd sp,   1*8(a0)

@@ -49,7 +49,7 @@ pub fn get_process_at_mut(index: usize) -> &'static mut Process {
 pub fn iterate_process_table_mut(start_idx: usize) -> impl Iterator<Item = &'static mut Process> {
     let table = unsafe { &mut PROC_TABLE };
 
-    let (left, right) = table.table.split_at_mut(start_idx);
+    let (left, right) = table.table[0..table.head].split_at_mut(start_idx);
 
     left.iter_mut()
         .map(|p| unsafe { p.assume_init_mut() })
