@@ -116,7 +116,6 @@ extern "C" fn idle_task() {
 #[inline(never)]
 extern "C" fn reaper_task() {
     loop {
-        kprint("got here brutha\n");
         task::iterate_process_table_mut(0)
             .filter(|p| p.state == task::ProcessState::Zombie)
             .for_each(|p| task::reap_process(p));

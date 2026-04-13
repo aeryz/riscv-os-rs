@@ -1,5 +1,5 @@
 [workspace]
-members = ["kernel", "riscv"]
+members = ["kernel", "ksync", "riscv"]
 resolver = "3"
 
 [workspace.package]

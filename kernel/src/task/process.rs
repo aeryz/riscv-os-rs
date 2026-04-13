@@ -196,18 +196,6 @@ pub fn reap_process(process: &mut Process) {
             .unwrap()
     };
 
-    crate::kprint("[ADDRESS SPACE OF PID] ");
-    crate::kprint(crate::u64_to_str(process.pid as u64, &mut [0; 20]));
-    process
-        .address_space
-        .regions
-        .iter()
-        .filter_map(|r| r.as_ref())
-        .for_each(|r| {
-            crate::kprint("\tStart >> ");
-            crate::kprint(crate::u64_to_str_hex(r.start.raw(), &mut [0; 20]));
-        });
-
     process
         .address_space
         .regions
@@ -217,13 +205,9 @@ pub fn reap_process(process: &mut Process) {
         .for_each(|r| {
             let mut i = r.start;
             while i.raw() < r.end.raw() {
-                crate::kprint("handling: ");
-                crate::kprint(crate::u64_to_str_hex(i.raw(), &mut [0; 20]));
                 let pa = root_table
                     .translate(i)
                     .expect("All the virtual addresses in an address space must be valid");
-                crate::kprint("translated to: ");
-                crate::kprint(crate::u64_to_str_hex(pa.raw(), &mut [0; 20]));
 
                 mm::free(pa);
 
