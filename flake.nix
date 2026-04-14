@@ -14,6 +14,7 @@
         let
           overlays = [ (import rust-overlay) ];
           pkgs = import nixpkgs { inherit system overlays; };
+          riscvPkgs = pkgs.pkgsCross.riscv64;
           # bpf-linker has a hard requirement on llvm 21
           llvmPackages = pkgs.llvmPackages_21;
           # this specific rust version is built on llvm 21, DO NOT blindly upgrade
@@ -65,6 +66,14 @@
               abi = "ilp32";
             };
           };
+
+        riscv-toolchain-linux =
+          import nixpkgs {
+            localSystem = "${system}";
+            crossSystem = {
+              config = "riscv64-linux-gnu";
+            };
+          };
         in
     {
     devShells.default = pkgs.mkShell {
@@ -78,11 +87,14 @@
         bindgen
         rustfmt
         riscv-toolchain.buildPackages.binutils
+        riscv-toolchain-linux.buildPackages.gcc
       ];
 
       shellHook = ''
         export LIBCLANG_PATH=${llvmPackages.libclang.lib}/lib
       '';
     };
+
+  packages.opensbi = riscvPkgs.opensbi;
   });
 }

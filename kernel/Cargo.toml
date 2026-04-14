@@ -5,13 +5,13 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-bitflags = "2.11.0"
-riscv = { workspace = true }
+# bitflags = "2.11.0"
+# riscv = { workspace = true }
 
 [build-dependencies]
 cc = "1"
 
 [features]
-default = [ "riscv" ]
-riscv = [ "sv39" ]
-sv39 = []
+# default = [ "riscv" ]
+# riscv = [ "sv39" ]
+# sv39 = []
