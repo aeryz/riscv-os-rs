@@ -1,3 +1,4 @@
+use ksync::SpinLock;
 use riscv::registers::{Satp, SatpMode};
 
 use crate::{
@@ -5,12 +6,10 @@ use crate::{
     mm::{self, allocator},
 };
 
+pub const KB: usize = 1 << 10;
 pub const GB: usize = 1 << 30;
 
-// TODO(aeryz): add spinlock:
-// But I still need to confirm how a lock would actually work here. Because we cannot
-// prohibit the hardware from accessing here while modifying this table.
-static mut KERNEL_ROOT_PAGE_TABLE: PageTable = PageTable::empty();
+static KERNEL_ROOT_PAGE_TABLE: SpinLock<PageTable> = SpinLock::new(PageTable::empty());
 
 unsafe extern "C" {
     static __text_start: u8;
@@ -18,45 +17,57 @@ unsafe extern "C" {
     static __kernel_end: u8;
 }
 
-/// Saves the kernel root table
-#[inline(never)]
-pub fn init() {
+/// Performs early memory initialization and enables paging.
+///
+/// This function *MUST* run in the early boot phase where the paging is not enabled yet.
+/// All the pointers used here are assumed to be physical addresses.
+///
+/// # Responsibilities
+/// - Initializes the physical memory allocator starting from `__kernel_end`.
+/// - Creates the kernel root page table with the following mappings:
+///     - Whole memory is mapped with 1GB `RW` pages starting from `mm::KERNEL_DIRECT_MAPPING_BASE`.
+///     - The last 2GB of the memory is reserved for the kernel text and it's mapped with 2 1GB `RX` pages.
+///     - Kernel text is identity mapped so that we don't immediately trap after changing `satp`.
+/// - Enables the paging.
+/// - Changes the stack pointer to the higher base (0x80...-> 0xffff80...).
+///
+/// # Safety
+/// - Assumes the kernel's executable text is put directly at `__text_start` and it ends in `__text_end`.
+/// - Assumes the `__kernel_end` is put at the end of the kernel image and is *4k-aligned*.
+/// - Assumes this is a single-hart boot.
+pub fn early_init() {
     // TODO(aeryz): We want to have a separate spot for the allocatable memory.
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as usize) };
     allocator::init(memory_start);
 
     let text_end = unsafe { &__text_end as *const u8 as usize };
-    unsafe {
-        let mut text_start =
-            PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as usize);
-        let n_text_pages = (text_end - text_start.raw()) / 4096 + 1;
-        kvm_full_map(&mut KERNEL_ROOT_PAGE_TABLE);
-        crate::kdebug("kvm full mapped \n");
+    let mut text_start =
+        unsafe { PhysicalAddress::from_raw_unchecked(&__text_start as *const u8 as usize) };
+    let n_text_pages = (text_end - text_start.raw()) / KB + 1;
+
+    let root_pt_ptr = {
+        let mut root_pt = KERNEL_ROOT_PAGE_TABLE.lock();
+        kvm_full_map(&mut root_pt);
         for _ in 0..n_text_pages {
-            KERNEL_ROOT_PAGE_TABLE.map_vm_early(
+            root_pt.map_vm_early(
                 text_start.to_identical_va().unwrap(),
                 text_start,
                 PteFlags::RWX,
             );
-            text_start = PhysicalAddress::from_raw_unchecked(text_start.raw() + 0x1000);
+            text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 0x1000) };
         }
-    }
+        &*root_pt as *const PageTable as usize
+    };
 
-    riscv::write_satp(
-        Satp::empty()
-            .set_mode(SatpMode::Sv39)
-            .set_ppn((unsafe { &KERNEL_ROOT_PAGE_TABLE }) as *const PageTable as usize),
+    riscv::write_satp_tlb_flush(Satp::empty().set_mode(SatpMode::Sv39).set_ppn(root_pt_ptr));
+
+    riscv::const_add_to_sp::<{ (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()) }>(
     );
-
-    riscv::const_add_to_sp::<
-        { (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()) as usize },
-    >();
 }
 
-// TODO(aeryz): make this dynamic
-/// Maps the whole ram and the kernel image so that
-/// the processes and the kernel can easily access pretty much anywhere
+/// Maps the whole memory starting from `mm::KERNEL_DIRECT_MAPPING_BASE` and maps the kernel text as executable
+/// so that we don't need to switch page tables during traps.
 pub fn kvm_full_map(page_table: &mut PageTable) {
     let va = mm::KERNEL_DIRECT_MAPPING_BASE;
 

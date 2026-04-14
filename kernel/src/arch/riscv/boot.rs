@@ -16,7 +16,7 @@ pub extern "C" fn bootentry(hart_id: usize, dtb_pa: usize) -> ! {
     kdebug("magic: ");
     kdebug(usize_to_str_hex(magic as usize, &mut buf));
 
-    mm::init();
+    mm::early_init();
 
     unsafe {
         asm!(
