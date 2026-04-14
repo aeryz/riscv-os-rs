@@ -11,7 +11,7 @@ SECTIONS
 
   .text : AT(ADDR(.text) - LOAD_OFFSET) {
     __text_start = .;
-    KEEP(*(.text.entry))
+    KEEP(*(.text.kernel))
     *(.text .text.*)
     __text_end = .;
   }

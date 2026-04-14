@@ -1,14 +1,14 @@
-    .section .text.entry
-    .globl _start
+        .global _start
+        .section .text.kernel
 _start:
-    /* set up stack */
-    la sp, __kernel_stack_top
+        /* set up stack */
+        la sp, __kernel_stack_top
 1:
-    bgeu t0, t1, 2f
-    sd   zero, 0(t0)
-    addi t0, t0, 8
-    j    1b
+        bgeu t0, t1, 2f
+        sd   zero, 0(t0)
+        addi t0, t0, 8
+        j    1b
 2:
-    call bootentry
+        call bootentry
 
-3:  j 3b
+3:      j 3b
