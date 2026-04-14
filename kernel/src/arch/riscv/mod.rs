@@ -5,7 +5,7 @@ use riscv::registers::Satp;
 
 use crate::arch::{
     Architecture, MemoryModel, VirtualAddressOf,
-    mmu::{PhysicalAddress, VirtualAddress},
+    mmu::{PageTable, PhysicalAddress, VirtualAddress},
 };
 
 pub struct Riscv;
@@ -14,6 +14,10 @@ impl Architecture for Riscv {
     const CPU_HERTZ: usize = 10_000_000;
 
     type MemoryModel = Self;
+
+    fn bump_sp(sp: usize) {
+        riscv::add_to_sp(sp);
+    }
 }
 
 impl MemoryModel for Riscv {

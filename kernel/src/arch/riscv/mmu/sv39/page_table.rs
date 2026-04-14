@@ -19,24 +19,14 @@ impl PageTable {
     ///
     /// This only meant to operate when the virtual memory is not enabled.
     pub fn map_vm_early(&mut self, va: VirtualAddress, pa: PhysicalAddress, flags: PteFlags) {
-        self.map_memory_with_base::<false>(va, pa, flags, 0);
+        self.map_memory_with_base(va, pa, flags, 0);
     }
 
     /// Map the `va` to `pa`.
     ///
     /// This should be used after the virtual memory is enabled and the kvm mappings are done.
     pub fn map_vm(&mut self, va: VirtualAddress, pa: PhysicalAddress, flags: PteFlags) {
-        self.map_memory_with_base::<false>(
-            va,
-            pa,
-            flags,
-            KERNEL_DIRECT_MAPPING_BASE.raw() as usize,
-        );
-    }
-
-    /// This should be used after the virtual memory is enabled and the kvm mappings are done.
-    pub fn map_vm_debug(&mut self, va: VirtualAddress, pa: PhysicalAddress, flags: PteFlags) {
-        self.map_memory_with_base::<true>(va, pa, flags, KERNEL_DIRECT_MAPPING_BASE.raw() as usize);
+        self.map_memory_with_base(va, pa, flags, KERNEL_DIRECT_MAPPING_BASE.raw() as usize);
     }
 
     pub fn translate(&self, va: VirtualAddress) -> Option<PhysicalAddress> {
@@ -57,7 +47,7 @@ impl PageTable {
         }
     }
 
-    fn map_memory_with_base<const D: bool>(
+    fn map_memory_with_base(
         &mut self,
         va: VirtualAddress,
         pa: PhysicalAddress,

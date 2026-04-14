@@ -34,9 +34,21 @@ pub fn mret() -> ! {
 pub fn const_add_to_sp<const N: usize>() {
     unsafe {
         core::arch::asm!(
-            "li t0, {kernel_offset}",
+            "mv t0, {kernel_offset}",
             "add sp, sp, t0",
             kernel_offset = const N,
+            options(nostack, preserves_flags),
+        );
+    }
+}
+
+#[inline(always)]
+pub fn add_to_sp(sp: usize) {
+    unsafe {
+        core::arch::asm!(
+            "mv t0, {}",
+            "add sp, sp, t0",
+            in(reg) sp,
             options(nostack, preserves_flags),
         );
     }

@@ -11,6 +11,9 @@ pub trait Architecture {
     const CPU_HERTZ: usize;
 
     type MemoryModel: MemoryModel;
+
+    #[inline(always)]
+    fn bump_sp(sp: usize);
 }
 
 pub type VirtualAddressOf<Arch> =

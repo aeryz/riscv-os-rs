@@ -1,10 +1,15 @@
-use ksync::SpinLock;
-use riscv::registers::{Satp, SatpMode};
+// TODO(aeryz): This module contains a lot of arch specific code since we full mapping of the memory.
+// We need to extend `arch::MemoryModel` to handle these.
 
 use crate::{
-    arch::mmu::{PageTable, PageTableEntry, PhysicalAddress, PteFlags},
+    Arch,
+    arch::{
+        Architecture, MemoryModel,
+        mmu::{PageTable, PageTableEntry, PhysicalAddress, PteFlags},
+    },
     mm::{self, allocator},
 };
+use ksync::SpinLock;
 
 pub const KB: usize = 1 << 10;
 pub const GB: usize = 1 << 30;
@@ -57,13 +62,12 @@ pub fn early_init() {
             );
             text_start = unsafe { PhysicalAddress::from_raw_unchecked(text_start.raw() + 0x1000) };
         }
-        &*root_pt as *const PageTable as usize
+        unsafe { PhysicalAddress::from_raw_unchecked(&*root_pt as *const PageTable as usize) }
     };
 
-    riscv::write_satp_tlb_flush(Satp::empty().set_mode(SatpMode::Sv39).set_ppn(root_pt_ptr));
+    Arch::set_root_page_table(root_pt_ptr);
 
-    riscv::const_add_to_sp::<{ (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()) }>(
-    );
+    Arch::bump_sp(mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw());
 }
 
 /// Maps the whole memory starting from `mm::KERNEL_DIRECT_MAPPING_BASE` and maps the kernel text as executable

@@ -1,30 +1,27 @@
 use core::cell::OnceCell;
 
+use ksync::SpinLock;
+
 use crate::arch::mmu::PhysicalAddress;
 
-static mut ALLOCATOR: OnceCell<Allocator<16>> = OnceCell::new();
-
-// The allocator public api:
+static ALLOCATOR: SpinLock<Allocator<16>> = SpinLock::new(Allocator::new(unsafe {
+    PhysicalAddress::from_raw_unchecked(0)
+}));
 
 /// Initialize the allocator with the given `start_addr`.
-/// This will only `init` once even if it is called multiple times.
 pub(super) fn init(start_addr: PhysicalAddress) {
-    unsafe {
-        let _ = ALLOCATOR.get_or_init(|| Allocator::new(start_addr));
-    }
+    ALLOCATOR.lock().start_addr = start_addr;
 }
 
 // TODO: be able to allocate a custom amount (will probably have this while implementing sbrk)
 /// Allocate a single 4k page.
 pub fn alloc() -> Result<PhysicalAddress, ()> {
-    unsafe { ALLOCATOR.get_mut().unwrap().alloc() }
+    ALLOCATOR.lock().alloc()
 }
 
 /// Free a single 4k page.
 pub fn free(ptr: PhysicalAddress) {
-    unsafe {
-        ALLOCATOR.get_mut().unwrap().free(ptr);
-    }
+    ALLOCATOR.lock().free(ptr)
 }
 
 /// Dumb allocator
