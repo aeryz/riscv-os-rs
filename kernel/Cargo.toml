@@ -7,6 +7,7 @@ edition.workspace = true
 [dependencies]
 bitflags = "2.11.0"
 riscv = { workspace = true }
+ksync = { workspace = true }
 
 [build-dependencies]
 cc = "1"

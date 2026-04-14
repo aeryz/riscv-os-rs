@@ -10,7 +10,7 @@ pub fn clear_tlb() {
     unsafe { asm!("sfence.vma x0, x0", options(nostack, preserves_flags)) }
 }
 
-pub fn write_satp(satp: Satp) {
+pub fn write_satp_tlb_flush(satp: Satp) {
     satp.write();
     clear_tlb();
 }
