@@ -4,8 +4,6 @@ use crate::{kdebug, kmain, mm, usize_to_str, usize_to_str_hex};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn bootentry(hart_id: usize, dtb_pa: usize) -> ! {
-    kdebug(b"hello world from kernel\n");
-
     let mut buf = [0; 20];
     kdebug("hart id: ");
     kdebug(usize_to_str(hart_id, &mut buf));

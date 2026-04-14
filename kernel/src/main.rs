@@ -16,6 +16,7 @@ core::arch::global_asm!(include_str!("start.s"));
 
 #[unsafe(no_mangle)]
 extern "C" fn kmain(_hartid: usize, _dtb_address: usize) {
+    kdebug("hello from kernel\n");
     panic!();
 }
 
