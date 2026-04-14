@@ -1,3 +1,5 @@
+use ksync::SpinLock;
+
 pub const KB: usize = 1 << 10;
 pub const MB: usize = 1 << 20;
 pub const GB: usize = 1 << 30;
@@ -93,12 +95,17 @@ pub fn ktrace<T: AsRef<[u8]>>(b: T) {
     kprint(b)
 }
 
+static CONSOLE_LOCK: SpinLock<()> = SpinLock::new(());
+
 pub fn kdebug<T: AsRef<[u8]>>(b: T) {
+    // TODO(aeryz): THIS IS GONNA 100% DEADLOCK UNLESS WE MAKE SURE THE INTERRUPTS ARE DISABLED.
+    // maybe a interrupt disabling spinlock where calling `lock` always disables interrupts first?
+    let _console_guard = CONSOLE_LOCK.lock();
     if DEBUG_LEVEL > DebugLevel::Debug {
         return;
     }
     kprint("[KDEBUG] ");
-    kprint(b)
+    kprint(b);
 }
 
 pub fn kinfo<T: AsRef<[u8]>>(b: T) {
