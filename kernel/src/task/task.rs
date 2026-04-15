@@ -1,0 +1,21 @@
+use crate::task::{AddressSpace, Pid, TaskState};
+
+#[repr(C)]
+#[derive(Clone)]
+pub struct Task {
+    /// Process ID
+    pub pid: Pid,
+    /// Kernel stack pointer
+    pub kernel_sp: u64,
+    /// The tick count at when the process started running
+    pub ticks_at_started_running: usize,
+    /// The current state of the process
+    pub state: TaskState,
+    /// Wake up time in ticks
+    pub wake_up_at: usize,
+    // TODO(aeryz): We can consider putting this exit code into the relevant state enum
+    /// Process exit code
+    pub exit_code: i32,
+    /// Address space
+    pub address_space: AddressSpace,
+}
