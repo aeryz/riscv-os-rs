@@ -7,8 +7,6 @@ pub struct Task {
     pub pid: Pid,
     /// Kernel stack pointer
     pub kernel_sp: u64,
-    /// The tick count at when the process started running
-    pub ticks_at_started_running: usize,
     /// The current state of the process
     pub state: TaskState,
     /// Wake up time in ticks
