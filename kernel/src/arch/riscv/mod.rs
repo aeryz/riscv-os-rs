@@ -1,6 +1,8 @@
 mod boot;
 pub mod mmu;
 
+use core::ptr::NonNull;
+
 use riscv::registers::Satp;
 
 use crate::arch::{
@@ -17,6 +19,15 @@ impl Architecture for Riscv {
 
     fn bump_sp(sp: usize) {
         riscv::add_to_sp(sp);
+    }
+
+    fn load_this_cpu_ctx<T>() -> *mut T {
+        riscv::read_tp() as *mut T
+    }
+
+    fn read_current_time() -> usize {
+        // TODO(aeryz): through sbi
+        todo!()
     }
 }
 

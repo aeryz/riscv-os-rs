@@ -53,3 +53,16 @@ pub fn add_to_sp(sp: usize) {
         );
     }
 }
+
+#[inline(always)]
+pub fn read_tp() -> usize {
+    let tp: usize;
+    unsafe {
+        core::arch::asm!(
+            "mv {0}, tp",
+            out(reg) tp,
+            options(nomem, nostack, preserves_flags),
+        );
+    }
+    tp
+}

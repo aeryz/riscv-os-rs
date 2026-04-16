@@ -9,6 +9,8 @@ pub type Arch = arch::Riscv;
 mod arch;
 mod debug;
 mod mm;
+mod percpu;
+mod sched;
 mod task;
 
 pub use debug::*;
