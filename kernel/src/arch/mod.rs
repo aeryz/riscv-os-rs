@@ -12,6 +12,8 @@ pub use riscv::*;
 pub trait Architecture {
     const CPU_HERTZ: usize;
 
+    type TrapFrame: TrapFrame<Self>;
+
     type MemoryModel: MemoryModel;
 
     #[inline(always)]
@@ -26,12 +28,21 @@ pub trait Architecture {
 
     /// Reads the current time
     fn read_current_time() -> usize;
+
+    /// Sets the trap handler
+    fn init_trap_handler();
+
+    fn enable_interrupts();
+
+    // TODO(aeryz): We probably don't want this like this but for now, we have this
+    fn init_uart(core_id: usize);
 }
 
 pub type VirtualAddressOf<Arch> =
     <<Arch as Architecture>::MemoryModel as MemoryModel>::VirtualAddress;
 pub type PhysicalAddressOf<Arch> =
     <<Arch as Architecture>::MemoryModel as MemoryModel>::PhysicalAddress;
+pub type TrapFrameOf<Arch> = <Arch as Architecture>::TrapFrame;
 
 pub trait MemoryModel {
     type PhysicalAddress: Into<usize>;
@@ -41,4 +52,14 @@ pub trait MemoryModel {
     fn set_root_page_table(pa: Self::PhysicalAddress);
 
     fn get_root_page_table() -> usize;
+}
+
+pub trait TrapFrame<A: Architecture + ?Sized> {
+    fn initialize(instruction_ptr: VirtualAddressOf<A>, stack_ptr: VirtualAddressOf<A>) -> Self;
+
+    fn get_syscall(&self) -> usize;
+
+    fn set_syscall_return_value(&mut self, ret: usize);
+
+    fn get_arg<const I: usize>(&self) -> usize;
 }
