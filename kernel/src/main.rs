@@ -11,6 +11,7 @@ mod debug;
 mod mm;
 mod percpu;
 mod sched;
+mod serial_log;
 mod task;
 
 pub use debug::*;
@@ -21,7 +22,12 @@ core::arch::global_asm!(include_str!("start.s"));
 
 #[unsafe(no_mangle)]
 extern "C" fn kmain(_hartid: usize, _dtb_address: usize) {
-    kdebug("hello from kernel\n");
+    serial_log::init();
+    log::info!(
+        "Kernel starts with hart_id: {}, dtb: 0x{:x}",
+        _hartid,
+        _dtb_address
+    );
 
     loop {
         core::hint::spin_loop();

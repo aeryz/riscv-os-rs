@@ -1,19 +1,9 @@
 use core::arch::asm;
 
-use crate::{kdebug, kmain, mm, usize_to_str, usize_to_str_hex};
+use crate::{kmain, mm};
 
 #[unsafe(no_mangle)]
 pub extern "C" fn bootentry(hart_id: usize, dtb_pa: usize) -> ! {
-    let mut buf = [0; 20];
-    kdebug("hart id: ");
-    kdebug(usize_to_str(hart_id, &mut buf));
-    kdebug("dtb pa: ");
-    kdebug(usize_to_str_hex(dtb_pa, &mut buf));
-
-    let magic = u32::from_be(unsafe { *(dtb_pa as *const u32) });
-    kdebug("magic: ");
-    kdebug(usize_to_str_hex(magic as usize, &mut buf));
-
     mm::early_init();
 
     unsafe {
