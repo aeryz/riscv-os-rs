@@ -29,32 +29,6 @@ qemu-system-riscv64 \
 
 ## Non-exhaustive list of the roadmap
 
-### Phase 1 (boot):
-- [X] Boot into the kernel in M-mode.
-- [X] Print to console using UART.
-- [X] Do the necessary adjustments to `mstatus`, setup the `pmp` and switch to S-mode.
-- [X] Setup a stub trap handler and switch to U-mode. Make sure `ecall` works.
-
-### Phase 2 (prepare for userspace programs):
-- [X] Implement a 4-byte aligned trampoline for the trap handler and the trap frame.
-- [X] Have a meaningful `ecall` similar to a `write` syscall in Linux, where the U-mode can print to console.
-- [X] Setup the page table with a very simple bump allocator.
-- [X] Arrange the project and isolate the inline assembly into a reusable library.
-
-### Phase 3 (handle userspace programs):
-- [X] Create one userspace process.
-- [X] Create a static process table and `schedule` after the trap handling.
-- [X] Create N user processes.
-- [ ] Create a basic proc table and make exit and new spawns possible.
-- [ ] Add timer interrupt and experiment with yielding the execution to the kernel.
-
-### Phase 4 (non-stub page allocator):
-- [ ] Have a page allocator (haven't decided on the algorithm right now)
-
-### Phase 5 (filesystem):
-TBD
-
-### Phase 6 (more functionality from the POSIX):
 TBD
 
 ## Resources
