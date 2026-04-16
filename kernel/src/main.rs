@@ -8,26 +8,35 @@ pub type Arch = arch::Riscv;
 
 mod arch;
 mod debug;
+mod driver;
 mod mm;
 mod percpu;
 mod sched;
 mod serial_log;
+mod syscall;
 mod task;
+mod userspace;
 
 pub use debug::*;
 
-use crate::arch::MemoryModel;
+use crate::{
+    arch::{Architecture, MemoryModel},
+    driver::uart,
+};
 
 core::arch::global_asm!(include_str!("start.s"));
 
 #[unsafe(no_mangle)]
-extern "C" fn kmain(_hartid: usize, _dtb_address: usize) {
+extern "C" fn kmain(hartid: usize, dtb_address: usize) {
     serial_log::init();
-    log::info!(
-        "Kernel starts with hart_id: {}, dtb: 0x{:x}",
-        _hartid,
-        _dtb_address
-    );
+    log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
+
+    Arch::init_trap_handler();
+
+    Arch::init_uart(hartid);
+
+    uart::enable_interrupts();
+    Arch::enable_interrupts();
 
     loop {
         core::hint::spin_loop();

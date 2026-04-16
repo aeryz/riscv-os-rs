@@ -1,4 +1,9 @@
-use crate::task::{AddressSpace, Pid, TaskState};
+use crate::{
+    Arch,
+    arch::VirtualAddressOf,
+    mm,
+    task::{AddressSpace, Pid, TaskState},
+};
 
 #[repr(C)]
 #[derive(Clone)]
@@ -6,7 +11,7 @@ pub struct Task {
     /// Process ID
     pub pid: Pid,
     /// Kernel stack pointer
-    pub kernel_sp: u64,
+    pub kernel_sp: VirtualAddressOf<Arch>,
     /// The current state of the process
     pub state: TaskState,
     /// Wake up time in ticks
