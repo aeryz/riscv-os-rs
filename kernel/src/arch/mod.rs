@@ -3,6 +3,8 @@
 #[cfg(feature = "riscv-sbi")]
 mod riscv;
 
+use core::ptr::NonNull;
+
 #[cfg(feature = "riscv-sbi")]
 pub use riscv::*;
 
@@ -14,6 +16,16 @@ pub trait Architecture {
 
     #[inline(always)]
     fn bump_sp(sp: usize);
+
+    /// Loads the pointer to the current CPU context.
+    ///
+    /// SAFETY:
+    /// - It's totally kernel's responsibility to properly set the CPU context.
+    #[inline(always)]
+    fn load_this_cpu_ctx<T>() -> *mut T;
+
+    /// Reads the current time
+    fn read_current_time() -> usize;
 }
 
 pub type VirtualAddressOf<Arch> =
