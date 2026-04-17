@@ -11,7 +11,10 @@ use riscv::registers::Satp;
 use crate::arch::{
     Architecture, MemoryModel, VirtualAddressOf,
     mmu::{PageTable, PhysicalAddress, VirtualAddress},
-    trap::{trap::trap_entry, trap_frame::TrapFrame},
+    trap::{
+        trap::{trap_entry, trap_resume},
+        trap_frame::TrapFrame,
+    },
 };
 
 use context::Context;
@@ -41,10 +44,6 @@ impl Architecture for Riscv {
     }
 
     fn init_trap_handler() {
-        log::info!(
-            "initing the trap handler to 0x{:x}",
-            trap_entry as *const () as usize
-        );
         riscv::registers::Stvec::new(trap_entry as *const () as usize).write();
     }
 
@@ -74,6 +73,10 @@ impl Architecture for Riscv {
                 in(reg) ptr.raw()
             );
         }
+    }
+
+    fn trap_resume_ptr() -> VirtualAddressOf<Self> {
+        VirtualAddress::from_raw(trap_resume as *const () as usize).unwrap()
     }
 }
 

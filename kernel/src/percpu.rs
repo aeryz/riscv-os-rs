@@ -1,4 +1,4 @@
-use core::ptr::NonNull;
+use core::{cell::OnceCell, ptr::NonNull};
 
 use ksync::SpinLock;
 
@@ -6,7 +6,7 @@ use crate::{sched::PerCoreScheduler, task::Task};
 
 pub const MAX_CORES: usize = 16;
 
-static CORES: CoreTable = CoreTable(heapless::Vec::new());
+static CORES: CoreTable = CoreTable(OnceCell::new());
 
 #[repr(C)]
 pub struct PerCoreContext {
@@ -14,7 +14,7 @@ pub struct PerCoreContext {
     pub scheduler: SpinLock<PerCoreScheduler>,
     pub currently_running_task: NonNull<Task>,
     pub idle_task: NonNull<Task>,
-    pub reaper_task: NonNull<Task>,
+    // pub reaper_task: NonNull<Task>,
 }
 
 // TODO(aeryz): Storing pointers (that can possibly be *mut) in the PerCpuContext
@@ -24,7 +24,7 @@ pub struct PerCoreContext {
 // we really need to think more about this.
 unsafe impl Send for PerCoreContext {}
 
-struct CoreTable(heapless::Vec<PerCoreContext, MAX_CORES>);
+struct CoreTable(OnceCell<heapless::Vec<PerCoreContext, MAX_CORES>>);
 
 /// SAFETY:
 /// CoreTable is a fixed table that will be initialized with the cores once and won't be mutated
@@ -32,10 +32,25 @@ struct CoreTable(heapless::Vec<PerCoreContext, MAX_CORES>);
 unsafe impl Send for CoreTable {}
 unsafe impl Sync for CoreTable {}
 
+pub fn set_core_ctxs(ctx: heapless::Vec<PerCoreContext, MAX_CORES>) {
+    CORES.0.get_or_init(|| ctx);
+}
+
 pub fn get_core_count() -> usize {
-    CORES.0.len()
+    CORES.0.get().expect("already initialized").len()
 }
 
 pub fn get_core<'a>(idx: usize) -> &'a PerCoreContext {
-    &CORES.0[idx]
+    &CORES.0.get().expect("already initialized")[idx]
+}
+
+impl core::fmt::Debug for PerCoreContext {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PerCoreContext")
+            .field("core_id", &self.core_id)
+            .field("scheduler", &*self.scheduler.lock())
+            .field("currently_running_task", &self.currently_running_task)
+            .field("idle_task", &self.idle_task)
+            .finish()
+    }
 }

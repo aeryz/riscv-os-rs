@@ -29,6 +29,13 @@ pub struct PerCoreScheduler {
     last_entrance_time: usize,
 }
 
+pub fn init_per_core_scheduler() -> PerCoreScheduler {
+    PerCoreScheduler {
+        runqueue: heapless::Deque::new(),
+        last_entrance_time: 0,
+    }
+}
+
 /// Schedules a task
 ///
 /// This does not guarantee that the currently running task will change. If there are no runnable
@@ -85,7 +92,7 @@ pub fn enqueue_new_task(task: NonNull<Task>) {
     let idx = {
         let mut scheduler_ctx = SCHEDULER_CTX.lock();
 
-        if scheduler_ctx.last_rq_hart_idx >= percpu::get_core_count() {
+        if scheduler_ctx.last_rq_hart_idx + 1 >= percpu::get_core_count() {
             scheduler_ctx.last_rq_hart_idx = 0;
         } else {
             scheduler_ctx.last_rq_hart_idx += 1;
@@ -99,4 +106,13 @@ pub fn enqueue_new_task(task: NonNull<Task>) {
         .lock()
         .runqueue
         .push_back(task);
+}
+
+impl core::fmt::Debug for PerCoreScheduler {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("PerCoreScheduler")
+            .field("runqueue", &self.runqueue)
+            .field("last_entrance_time", &self.last_entrance_time)
+            .finish()
+    }
 }

@@ -17,10 +17,13 @@ mod syscall;
 mod task;
 mod userspace;
 
+use core::ptr::NonNull;
+
 pub use debug::*;
+use ksync::SpinLock;
 
 use crate::{
-    arch::{Architecture, MemoryModel},
+    arch::{Architecture, MemoryModel, mmu::VirtualAddress},
     driver::uart,
 };
 
@@ -32,12 +35,43 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
     Arch::init_trap_handler();
+    log::info!("trap handler initiated");
 
     Arch::init_uart(hartid);
+    log::info!("uart initiated");
 
     uart::enable_interrupts();
-    Arch::enable_interrupts();
+    log::info!("uart interrupts enabled");
 
+    let idle_task = task::create_kernel_task(
+        VirtualAddress::from_raw(idle_task as *const () as usize).unwrap(),
+    );
+    log::info!("idle task created");
+
+    let mut core_ctxs = heapless::Vec::new();
+    core_ctxs.push(percpu::PerCoreContext {
+        core_id: 0,
+        scheduler: SpinLock::new(sched::init_per_core_scheduler()),
+        currently_running_task: idle_task,
+        idle_task,
+    });
+    percpu::set_core_ctxs(core_ctxs);
+    log::info!("per cpu data is set");
+
+    let task_1 = task::create_process(
+        VirtualAddress::from_raw(userspace::userspace_sleep_print_loop as *const () as usize)
+            .unwrap(),
+    );
+    log::info!("task 1 is created");
+    let task_2 = task::create_process(
+        VirtualAddress::from_raw(userspace::userspace_sleep_print_loop2 as *const () as usize)
+            .unwrap(),
+    );
+    log::info!("task 2 is created");
+
+    log::info!("Core state: {:#?}", percpu::get_core(0));
+
+    Arch::enable_interrupts();
     loop {
         core::hint::spin_loop();
     }
@@ -47,5 +81,20 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {
         core::hint::spin_loop();
+    }
+}
+
+#[unsafe(no_mangle)]
+#[inline(never)]
+extern "C" fn idle_task() {
+    log::debug!("idle mode");
+
+    loop {
+        riscv::registers::Sstatus::read()
+            .enable_supervisor_interrupts()
+            .write();
+        unsafe {
+            core::arch::asm!("wfi");
+        }
     }
 }
