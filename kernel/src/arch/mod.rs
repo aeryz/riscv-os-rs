@@ -16,6 +16,8 @@ pub trait Architecture {
 
     type MemoryModel: MemoryModel;
 
+    type Context;
+
     #[inline(always)]
     fn bump_sp(sp: usize);
 
@@ -36,6 +38,8 @@ pub trait Architecture {
 
     // TODO(aeryz): We probably don't want this like this but for now, we have this
     fn init_uart(core_id: usize);
+
+    fn switch_to(from: *mut Self::Context, to: *const Self::Context);
 }
 
 pub type VirtualAddressOf<Arch> =
@@ -43,6 +47,7 @@ pub type VirtualAddressOf<Arch> =
 pub type PhysicalAddressOf<Arch> =
     <<Arch as Architecture>::MemoryModel as MemoryModel>::PhysicalAddress;
 pub type TrapFrameOf<Arch> = <Arch as Architecture>::TrapFrame;
+pub type ContextOf<Arch> = <Arch as Architecture>::Context;
 
 pub trait MemoryModel {
     type PhysicalAddress: Into<usize>;
