@@ -1,9 +1,18 @@
 use crate::arch::trap::trap_frame::TrapFrame;
 
-#[unsafe(naked)]
-pub extern "C" fn trap_entry() -> ! {
-    core::arch::naked_asm!(
-        r#"
+unsafe extern "C" {
+    pub fn trap_entry();
+    pub fn trap_resume();
+}
+
+core::arch::global_asm!(
+r#"
+    .section .text.trap
+    .globl trap_entry
+    .globl trap_resume
+    .align 2
+trap_entry:
+
     // Swap the kernel and user stacks
     csrrw sp, sscratch, sp
 
@@ -67,15 +76,8 @@ save_trapframe:
     // Move the trap frame (sitting at sp) as the first param
     mv a0, sp
     call trap_handler
-        "#,
-    TRAPFRAME_SIZE = const size_of::<TrapFrame>(),
-    );
-}
 
-#[unsafe(naked)]
-pub extern "C" fn trap_resume() {
-    core::arch::naked_asm!(
-        r#"
+trap_resume:
     ld t0, 31*8(sp)
     csrw sepc, t0
 
@@ -128,7 +130,6 @@ pub extern "C" fn trap_resume() {
 ret_userspace:
     sret
         "#,
-    TRAPFRAME_SIZE = const size_of::<TrapFrame>(),
-    READ_SP = const (size_of::<TrapFrame>() - 8),
-    )
-}
+TRAPFRAME_SIZE = const size_of::<TrapFrame>(),
+READ_SP = const (size_of::<TrapFrame>() - 8),
+);

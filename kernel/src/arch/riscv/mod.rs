@@ -9,7 +9,7 @@ use core::ptr::NonNull;
 use riscv::registers::Satp;
 
 use crate::arch::{
-    Architecture, MemoryModel, VirtualAddressOf,
+    Architecture, MemoryModel, PhysicalAddressOf, VirtualAddressOf,
     mmu::{PageTable, PhysicalAddress, VirtualAddress},
     trap::{
         trap::{trap_entry, trap_resume},
@@ -63,7 +63,15 @@ impl Architecture for Riscv {
     }
 
     fn switch_to(from: *mut Self::Context, to: *const Self::Context) {
-        todo!()
+        unsafe { context::swtch(from, to) };
+    }
+
+    fn switch_to_user(
+        from: *mut Self::Context,
+        to: *const Self::Context,
+        root_pt: PhysicalAddressOf<Self>,
+    ) {
+        unsafe { context::swtch_to_user(from, to, mmu::pa_to_satp(root_pt)) };
     }
 
     fn set_per_cpu_ctx_ptr(ptr: VirtualAddressOf<Self>) {
@@ -77,6 +85,13 @@ impl Architecture for Riscv {
 
     fn trap_resume_ptr() -> VirtualAddressOf<Self> {
         VirtualAddress::from_raw(trap_resume as *const () as usize).unwrap()
+    }
+
+    fn setup_unpriviledged_mode() {
+        riscv::registers::Sstatus::read()
+            .enable_user_mode()
+            .enable_user_page_access()
+            .write();
     }
 }
 

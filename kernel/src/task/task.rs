@@ -56,7 +56,7 @@ pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     })
 }
 
-pub fn create_process(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
+pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     // we first initiate user's root page table
     let process_root_table_pa = mm::alloc().unwrap();
     let process_root_table_va =
