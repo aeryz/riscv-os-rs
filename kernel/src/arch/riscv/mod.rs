@@ -22,6 +22,8 @@ impl Architecture for Riscv {
 
     type TrapFrame = TrapFrame;
 
+    type Context = ();
+
     fn bump_sp(sp: usize) {
         riscv::add_to_sp(sp);
     }
@@ -56,6 +58,10 @@ impl Architecture for Riscv {
 
     fn init_uart(core_id: usize) {
         plic::plic_init_uart(core_id);
+    }
+
+    fn switch_to(from: *mut Self::Context, to: *const Self::Context) {
+        todo!()
     }
 }
 

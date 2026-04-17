@@ -1,6 +1,8 @@
+use core::ptr::NonNull;
+
 use crate::{
     Arch,
-    arch::VirtualAddressOf,
+    arch::{ContextOf, VirtualAddressOf},
     mm,
     task::{AddressSpace, Pid, TaskState},
 };
@@ -12,6 +14,8 @@ pub struct Task {
     pub pid: Pid,
     /// Kernel stack pointer
     pub kernel_sp: VirtualAddressOf<Arch>,
+    /// Pointer to the context
+    pub context: NonNull<ContextOf<Arch>>,
     /// The current state of the process
     pub state: TaskState,
     /// Wake up time in ticks
