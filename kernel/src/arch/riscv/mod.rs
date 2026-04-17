@@ -93,6 +93,14 @@ impl Architecture for Riscv {
             .enable_user_page_access()
             .write();
     }
+
+    fn set_kernel_sp(sp: Option<VirtualAddressOf<Self>>) {
+        riscv::registers::Sscratch::new(match sp {
+            None => 0,
+            Some(sp) => sp.raw(),
+        })
+        .write();
+    }
 }
 
 impl MemoryModel for Riscv {

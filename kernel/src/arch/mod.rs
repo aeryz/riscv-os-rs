@@ -54,6 +54,8 @@ pub trait Architecture {
     fn trap_resume_ptr() -> VirtualAddressOf<Self>;
 
     fn setup_unpriviledged_mode();
+
+    fn set_kernel_sp(sp: Option<VirtualAddressOf<Self>>);
 }
 
 pub type VirtualAddressOf<Arch> =
