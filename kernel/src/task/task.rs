@@ -2,9 +2,13 @@ use core::ptr::NonNull;
 
 use crate::{
     Arch,
-    arch::{ContextOf, VirtualAddressOf},
-    mm,
-    task::{AddressSpace, Pid, TaskState},
+    arch::{
+        Context, ContextOf, VirtualAddressOf,
+        mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
+    },
+    mm::{self, KERNEL_DIRECT_MAPPING_BASE},
+    sched,
+    task::{self, ADDRESS_SPACE_EMPTY, AddressSpace, Pid, TaskState, VmRegion},
 };
 
 #[repr(C)]
@@ -15,7 +19,7 @@ pub struct Task {
     /// Kernel stack pointer
     pub kernel_sp: VirtualAddressOf<Arch>,
     /// Pointer to the context
-    pub context: NonNull<ContextOf<Arch>>,
+    pub context: ContextOf<Arch>,
     /// The current state of the process
     pub state: TaskState,
     /// Wake up time in ticks
@@ -25,4 +29,126 @@ pub struct Task {
     pub exit_code: i32,
     /// Address space
     pub address_space: AddressSpace,
+}
+
+pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
+    let kernel_stack = mm::alloc().unwrap();
+    let kernel_stack_va =
+        VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
+
+    // TODO(aeryz): I don't like this
+    let kernel_sp = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+    let context = ContextOf::<Arch>::initialize(entry, kernel_sp);
+
+    task::add_task(Task {
+        pid: Pid::create_next(),
+        kernel_sp,
+        context,
+        state: TaskState::Ready,
+        wake_up_at: 0,
+        exit_code: -1,
+        address_space: ADDRESS_SPACE_EMPTY,
+    })
+}
+
+pub fn create_process(entry: VirtualAddressOf<Arch>) {
+    // we first initiate user's root page table
+    let process_root_table_pa = mm::alloc().unwrap();
+    let process_root_table_va =
+        VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
+            .unwrap();
+    let process_root_table = process_root_table_va.as_ptr_mut();
+    unsafe { *process_root_table = PageTable::empty() };
+
+    let mut address_space = ADDRESS_SPACE_EMPTY;
+    address_space.root_pt = process_root_table_pa;
+
+    // we don't do heap for now
+    // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
+
+    // Assuming the code is at most 32K
+    for i in 0..8 {
+        let va = VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap();
+        unsafe {
+            (*process_root_table).map_vm(
+                va,
+                PhysicalAddress::from_raw_unchecked(
+                    entry.raw() - 0xffff_ffff_0000_0000 + 0x1000 * i,
+                ),
+                PteFlags::RX | PteFlags::U,
+            );
+        }
+        address_space.regions.push(VmRegion {
+            start: va,
+            end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
+            process_owned: false,
+        });
+    }
+
+    // 16K stack
+    for i in 0..4 {
+        let user_stack = mm::alloc().unwrap();
+
+        let va = VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap();
+        unsafe { (*process_root_table).map_vm(va, user_stack, PteFlags::RW | PteFlags::U) };
+        address_space.regions.push(VmRegion {
+            start: va,
+            end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
+            process_owned: true,
+        });
+    }
+
+    let kernel_stack_pa = {
+        let kernel_stack = mm::alloc().unwrap();
+        let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000).unwrap();
+
+        address_space.regions.push(VmRegion {
+            start: kernel_stack_va,
+            end: VirtualAddress::from_raw(kernel_stack_va.raw() + 4096).unwrap(),
+            process_owned: true,
+        });
+
+        unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
+
+        kernel_stack
+    };
+
+    // let kernel_view_of_the_users_kernel_stack =
+    //     kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0x3fa;
+
+    // let trap_frame_ptr = VirtualAddress::from_raw(
+    //     kernel_view_of_the_users_kernel_stack - size_of::<TrapFrameOf<Arch>>() as u64,
+    // )
+    // .unwrap();
+
+    // unsafe {
+    //     *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(
+    //         task::PROCESS_TEXT_ADDRESS,
+    //         task::PROCESS_STACK_ADDRESS,
+    //     );
+    // }
+
+    let context = ContextOf::<Arch>::initialize(
+        unsafe { VirtualAddress::from_raw_unchecked(0) },
+        unsafe { VirtualAddress::from_raw_unchecked(0) },
+        // VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
+        // VirtualAddress::from_raw(0x0000_0000_4fff_03fa - size_of::<TrapFrameOf<Arch>>() as u64)
+        //     .unwrap(),
+    );
+
+    mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
+
+    let task_ptr = task::add_task(Task {
+        pid: Pid::create_next(),
+        kernel_sp: VirtualAddress::from_raw(0x0000_0000_4fff_03fa)
+            .expect("virtual address is valid"),
+        // trap_frame: trap_frame_ptr.as_ptr_mut(),
+        context,
+        state: TaskState::Ready,
+        wake_up_at: 0,
+        exit_code: -1,
+        address_space,
+    });
+
+    sched::enqueue_new_task(task_ptr);
 }

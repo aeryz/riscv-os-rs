@@ -1,4 +1,5 @@
 mod boot;
+mod context;
 pub mod mmu;
 pub mod plic;
 pub mod trap;
@@ -13,6 +14,8 @@ use crate::arch::{
     trap::{trap::trap_entry, trap_frame::TrapFrame},
 };
 
+use context::Context;
+
 pub struct Riscv;
 
 impl Architecture for Riscv {
@@ -22,7 +25,7 @@ impl Architecture for Riscv {
 
     type TrapFrame = TrapFrame;
 
-    type Context = ();
+    type Context = Context;
 
     fn bump_sp(sp: usize) {
         riscv::add_to_sp(sp);
@@ -62,6 +65,15 @@ impl Architecture for Riscv {
 
     fn switch_to(from: *mut Self::Context, to: *const Self::Context) {
         todo!()
+    }
+
+    fn set_per_cpu_ctx_ptr(ptr: VirtualAddressOf<Self>) {
+        unsafe {
+            core::arch::asm!(
+                "mv tp, {}",
+                in(reg) ptr.raw()
+            );
+        }
     }
 }
 

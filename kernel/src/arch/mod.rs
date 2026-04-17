@@ -16,7 +16,7 @@ pub trait Architecture {
 
     type MemoryModel: MemoryModel;
 
-    type Context;
+    type Context: Context<Self>;
 
     #[inline(always)]
     fn bump_sp(sp: usize);
@@ -40,6 +40,8 @@ pub trait Architecture {
     fn init_uart(core_id: usize);
 
     fn switch_to(from: *mut Self::Context, to: *const Self::Context);
+
+    fn set_per_cpu_ctx_ptr(ptr: VirtualAddressOf<Self>);
 }
 
 pub type VirtualAddressOf<Arch> =
@@ -67,4 +69,8 @@ pub trait TrapFrame<A: Architecture + ?Sized> {
     fn set_syscall_return_value(&mut self, ret: usize);
 
     fn get_arg<const I: usize>(&self) -> usize;
+}
+
+pub trait Context<A: Architecture + ?Sized> {
+    fn initialize(entry: VirtualAddressOf<A>, kernel_sp: VirtualAddressOf<A>) -> Self;
 }

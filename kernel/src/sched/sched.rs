@@ -4,7 +4,7 @@ use ksync::SpinLock;
 
 use crate::{
     Arch,
-    arch::Architecture,
+    arch::{Architecture, ContextOf},
     mm,
     percpu::{self, PerCoreContext},
     task::{Task, TaskState},
@@ -43,7 +43,7 @@ pub fn schedule() {
     let mut sched = ctx.scheduler.lock();
     match sched.runqueue.pop_front() {
         Some(mut task) => {
-            let current_task = ctx.currently_running_task;
+            let mut current_task = ctx.currently_running_task;
 
             let new_task = unsafe { task.as_mut() };
             new_task.state = TaskState::Running;
@@ -52,8 +52,8 @@ pub fn schedule() {
             sched.runqueue.push_back(current_task);
 
             Arch::switch_to(
-                unsafe { current_task.as_ref().context.as_ptr() },
-                new_task.context.as_ptr().cast_const(),
+                unsafe { (&mut current_task.as_mut().context) as *mut ContextOf<Arch> },
+                (&new_task.context) as *const ContextOf<Arch>,
             );
         }
         None => {
@@ -71,8 +71,8 @@ pub fn schedule() {
             idle_task.state = TaskState::Running;
 
             Arch::switch_to(
-                current_task.context.as_ptr(),
-                idle_task.context.as_ptr().cast_const(),
+                (&mut current_task.context) as *mut ContextOf<Arch>,
+                (&idle_task.context) as *const ContextOf<Arch>,
             );
         }
     }
