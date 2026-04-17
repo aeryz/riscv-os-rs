@@ -42,6 +42,10 @@ pub trait Architecture {
     fn switch_to(from: *mut Self::Context, to: *const Self::Context);
 
     fn set_per_cpu_ctx_ptr(ptr: VirtualAddressOf<Self>);
+
+    /// The address where a first time spawned process jump to,
+    /// should be right after calling the trap handler in the trap entry
+    fn trap_resume_ptr() -> VirtualAddressOf<Self>;
 }
 
 pub type VirtualAddressOf<Arch> =

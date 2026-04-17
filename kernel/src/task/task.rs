@@ -3,13 +3,18 @@ use core::ptr::NonNull;
 use crate::{
     Arch,
     arch::{
-        Context, ContextOf, VirtualAddressOf,
+        Architecture, Context, ContextOf, TrapFrame, TrapFrameOf, VirtualAddressOf,
         mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
     },
     mm::{self, KERNEL_DIRECT_MAPPING_BASE},
     sched,
     task::{self, ADDRESS_SPACE_EMPTY, AddressSpace, Pid, TaskState, VmRegion},
 };
+
+pub const TASK_TEXT_ADDRESS: VirtualAddress =
+    unsafe { VirtualAddress::from_raw_unchecked(0x1_0000) };
+pub const TASK_STACK_ADDRESS: VirtualAddress =
+    unsafe { VirtualAddress::from_raw_unchecked(0x0000_0000_3fff_3fa0) };
 
 #[repr(C)]
 #[derive(Clone)]
@@ -51,7 +56,7 @@ pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     })
 }
 
-pub fn create_process(entry: VirtualAddressOf<Arch>) {
+pub fn create_process(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     // we first initiate user's root page table
     let process_root_table_pa = mm::alloc().unwrap();
     let process_root_table_va =
@@ -113,27 +118,22 @@ pub fn create_process(entry: VirtualAddressOf<Arch>) {
         kernel_stack
     };
 
-    // let kernel_view_of_the_users_kernel_stack =
-    //     kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0x3fa;
+    let kernel_view_of_the_users_kernel_stack =
+        kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0x3fa;
 
-    // let trap_frame_ptr = VirtualAddress::from_raw(
-    //     kernel_view_of_the_users_kernel_stack - size_of::<TrapFrameOf<Arch>>() as u64,
-    // )
-    // .unwrap();
+    let trap_frame_ptr = VirtualAddress::from_raw(
+        kernel_view_of_the_users_kernel_stack - size_of::<TrapFrameOf<Arch>>(),
+    )
+    .unwrap();
 
-    // unsafe {
-    //     *(trap_frame_ptr.as_ptr_mut()) = TrapFrameOf::<Arch>::initialize(
-    //         task::PROCESS_TEXT_ADDRESS,
-    //         task::PROCESS_STACK_ADDRESS,
-    //     );
-    // }
+    unsafe {
+        *(trap_frame_ptr.as_ptr_mut()) =
+            TrapFrameOf::<Arch>::initialize(task::TASK_TEXT_ADDRESS, task::TASK_STACK_ADDRESS);
+    }
 
     let context = ContextOf::<Arch>::initialize(
-        unsafe { VirtualAddress::from_raw_unchecked(0) },
-        unsafe { VirtualAddress::from_raw_unchecked(0) },
-        // VirtualAddress::from_raw(Arch::trap_resume_ptr() as u64).unwrap(),
-        // VirtualAddress::from_raw(0x0000_0000_4fff_03fa - size_of::<TrapFrameOf<Arch>>() as u64)
-        //     .unwrap(),
+        Arch::trap_resume_ptr(),
+        VirtualAddress::from_raw(0x0000_0000_4fff_03fa - size_of::<TrapFrameOf<Arch>>()).unwrap(),
     );
 
     mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
@@ -151,4 +151,6 @@ pub fn create_process(entry: VirtualAddressOf<Arch>) {
     });
 
     sched::enqueue_new_task(task_ptr);
+
+    task_ptr
 }

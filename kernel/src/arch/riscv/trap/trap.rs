@@ -73,7 +73,7 @@ save_trapframe:
 }
 
 #[unsafe(naked)]
-pub extern "C" fn trap_resume(trap_frame: u64) {
+pub extern "C" fn trap_resume() {
     core::arch::naked_asm!(
         r#"
     ld t0, 31*8(sp)
