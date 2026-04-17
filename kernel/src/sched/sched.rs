@@ -36,6 +36,8 @@ pub fn init_per_core_scheduler() -> PerCoreScheduler {
     }
 }
 
+// TODO(aeryz):
+// - Check if we need to set the kernel sp to 0 for the idle task
 /// Schedules a task
 ///
 /// This does not guarantee that the currently running task will change. If there are no runnable
