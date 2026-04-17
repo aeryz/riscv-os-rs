@@ -41,6 +41,7 @@ pub fn init_per_core_scheduler() -> PerCoreScheduler {
 /// This does not guarantee that the currently running task will change. If there are no runnable
 /// tasks and the currently running task is `Ready`, it will continue to run.
 pub fn schedule() {
+    log::debug!("Scheduling..");
     let ctx = unsafe {
         Arch::load_this_cpu_ctx::<PerCoreContext>()
             .as_mut()
@@ -50,6 +51,7 @@ pub fn schedule() {
     let mut sched = ctx.scheduler.lock();
     match sched.runqueue.pop_front() {
         Some(mut task) => {
+            log::debug!("rq is not empty, switching to the next task");
             let mut current_task = ctx.currently_running_task;
 
             let new_task = unsafe { task.as_mut() };
@@ -58,12 +60,19 @@ pub fn schedule() {
             ctx.currently_running_task = NonNull::new(new_task).expect("the task is nonnull");
             sched.runqueue.push_back(current_task);
 
-            Arch::switch_to(
+            log::debug!(
+                "the new process's root page table is: 0x{:x}",
+                new_task.address_space.root_pt.raw()
+            );
+
+            Arch::switch_to_user(
                 unsafe { (&mut current_task.as_mut().context) as *mut ContextOf<Arch> },
                 (&new_task.context) as *const ContextOf<Arch>,
+                new_task.address_space.root_pt,
             );
         }
         None => {
+            log::debug!("rq is empty, switching to the idle task");
             let current_task = unsafe { ctx.currently_running_task.as_mut() };
             // If there are no tasks that we can run and the currently running task can continue to be run,
             // we just run it. This also covers if the current_task is the idle task.

@@ -58,12 +58,12 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
     percpu::set_core_ctxs(core_ctxs);
     log::info!("per cpu data is set");
 
-    let task_1 = task::create_process(
+    let task_1 = task::create_task(
         VirtualAddress::from_raw(userspace::userspace_sleep_print_loop as *const () as usize)
             .unwrap(),
     );
     log::info!("task 1 is created");
-    let task_2 = task::create_process(
+    let task_2 = task::create_task(
         VirtualAddress::from_raw(userspace::userspace_sleep_print_loop2 as *const () as usize)
             .unwrap(),
     );
@@ -71,7 +71,15 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
 
     log::info!("Core state: {:#?}", percpu::get_core(0));
 
+    Arch::set_per_cpu_ctx_ptr(
+        VirtualAddress::from_raw(percpu::get_core(0) as *const percpu::PerCoreContext as usize)
+            .unwrap(),
+    );
+    Arch::setup_unpriviledged_mode();
+
     Arch::enable_interrupts();
+
+    sched::schedule();
     loop {
         core::hint::spin_loop();
     }

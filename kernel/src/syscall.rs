@@ -13,6 +13,8 @@ pub const SYSCALL_EXIT: usize = 5;
 // TODO(aeryz): We don't want to implement the syscalls here. But they should directly be implemented
 // in their respective subsystem.
 
+#[unsafe(no_mangle)]
+#[inline(never)]
 pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
     let syscall_number = tf.get_syscall();
     match syscall_number {
@@ -24,8 +26,7 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
             let utf8_str =
                 unsafe { str::from_utf8_unchecked(core::slice::from_raw_parts(buf, count)) };
 
-            // TODO(aeryz): this should be `console::print`
-            log::info!("{utf8_str}");
+            crate::printk(utf8_str);
 
             tf.set_syscall_return_value(count);
         }

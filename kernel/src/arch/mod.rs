@@ -41,11 +41,19 @@ pub trait Architecture {
 
     fn switch_to(from: *mut Self::Context, to: *const Self::Context);
 
+    fn switch_to_user(
+        from: *mut Self::Context,
+        to: *const Self::Context,
+        root_pt: PhysicalAddressOf<Self>,
+    );
+
     fn set_per_cpu_ctx_ptr(ptr: VirtualAddressOf<Self>);
 
     /// The address where a first time spawned process jump to,
     /// should be right after calling the trap handler in the trap entry
     fn trap_resume_ptr() -> VirtualAddressOf<Self>;
+
+    fn setup_unpriviledged_mode();
 }
 
 pub type VirtualAddressOf<Arch> =
