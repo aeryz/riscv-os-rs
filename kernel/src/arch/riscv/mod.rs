@@ -101,6 +101,10 @@ impl Architecture for Riscv {
         })
         .write();
     }
+
+    fn set_timer(time_val: usize) {
+        riscv::sbi::set_timer(time_val);
+    }
 }
 
 impl MemoryModel for Riscv {

@@ -56,6 +56,8 @@ pub trait Architecture {
     fn setup_unpriviledged_mode();
 
     fn set_kernel_sp(sp: Option<VirtualAddressOf<Self>>);
+
+    fn set_timer(time_val: usize);
 }
 
 pub type VirtualAddressOf<Arch> =
@@ -83,6 +85,8 @@ pub trait TrapFrame<A: Architecture + ?Sized> {
     fn set_syscall_return_value(&mut self, ret: usize);
 
     fn get_arg<const I: usize>(&self) -> usize;
+
+    fn set_per_core_ctx(&mut self, ptr: usize);
 }
 
 pub trait Context<A: Architecture + ?Sized> {

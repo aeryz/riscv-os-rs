@@ -10,6 +10,7 @@ pub fn write<T: AsRef<[u8]>>(buf: T) -> isize {
 pub extern "C" fn userspace_sleep_print_loop() -> ! {
     unsafe { core::arch::asm!(".align 12") };
     loop {
+        syscalls::sleep_ms(1000);
         let _ = write("[1] writing babeee");
     }
 }
@@ -18,6 +19,7 @@ pub extern "C" fn userspace_sleep_print_loop() -> ! {
 pub extern "C" fn userspace_sleep_print_loop2() -> ! {
     unsafe { core::arch::asm!(".align 12") };
     loop {
+        syscalls::sleep_ms(2000);
         let _ = write("[2] writing babeee");
     }
 }

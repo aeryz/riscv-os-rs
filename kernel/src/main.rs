@@ -30,7 +30,7 @@ use crate::{
 core::arch::global_asm!(include_str!("start.s"));
 
 #[unsafe(no_mangle)]
-extern "C" fn kmain(hartid: usize, dtb_address: usize) {
+extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
@@ -44,7 +44,7 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
     log::info!("uart interrupts enabled");
 
     let idle_task = task::create_kernel_task(
-        VirtualAddress::from_raw(idle_task as *const () as usize).unwrap(),
+        VirtualAddress::from_raw(idle_task_main as *const () as usize).unwrap(),
     );
     log::info!("idle task created");
 
@@ -80,13 +80,17 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) {
     Arch::enable_interrupts();
 
     sched::schedule();
-    loop {
-        core::hint::spin_loop();
-    }
+
+    idle_task_main();
 }
 
 #[panic_handler]
-fn panic(_info: &core::panic::PanicInfo) -> ! {
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    log::error!("KERNEL PANIC: {}", info.message());
+    if let Some(loc) = info.location() {
+        log::error!("-> File: {} at line: {}", loc.file(), loc.line());
+    }
+
     loop {
         core::hint::spin_loop();
     }
@@ -94,7 +98,7 @@ fn panic(_info: &core::panic::PanicInfo) -> ! {
 
 #[unsafe(no_mangle)]
 #[inline(never)]
-extern "C" fn idle_task() {
+extern "C" fn idle_task_main() -> ! {
     log::debug!("idle mode");
 
     loop {

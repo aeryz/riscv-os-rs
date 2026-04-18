@@ -1,6 +1,7 @@
 use crate::{
     Arch,
     arch::{Architecture, TrapFrame, TrapFrameOf},
+    task,
 };
 
 pub const SYSCALL_WRITE: usize = 1;
@@ -29,6 +30,9 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
             crate::printk(utf8_str);
 
             tf.set_syscall_return_value(count);
+        }
+        SYSCALL_SLEEP_MS => {
+            task::sleep_current_task();
         }
         _ => unreachable!(),
     }
