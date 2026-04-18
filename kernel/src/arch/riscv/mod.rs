@@ -39,8 +39,7 @@ impl Architecture for Riscv {
     }
 
     fn read_current_time() -> usize {
-        // TODO(aeryz): through sbi
-        todo!()
+        riscv::registers::Time::read().raw()
     }
 
     fn init_trap_handler() {
@@ -54,7 +53,7 @@ impl Architecture for Riscv {
 
         riscv::registers::Sie::empty()
             .enable_external_interrupts()
-            // .enable_timer_interrupt()
+            .enable_timer_interrupt()
             .write();
     }
 
@@ -104,6 +103,10 @@ impl Architecture for Riscv {
 
     fn set_timer(time_val: usize) {
         riscv::sbi::set_timer(time_val);
+    }
+
+    fn shutdown() {
+        riscv::sbi::shutdown();
     }
 }
 

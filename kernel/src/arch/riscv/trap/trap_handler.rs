@@ -35,7 +35,9 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
 
             log::info!("print happened");
         }
-        TrapCause::TimerInterrupt => {}
+        TrapCause::TimerInterrupt => {
+            panic!("timer interrupt is hit");
+        }
         TrapCause::Syscall => {
             // This is a syscall, so we move the return program counter to just after the `ecall`
             trap_frame.sepc += 4;
