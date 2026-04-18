@@ -63,7 +63,7 @@ pub trait Architecture {
         nanos * Self::CPU_HERTZ / 1_000_000_000
     }
 
-    fn shutdown();
+    fn halt();
 }
 
 pub type VirtualAddressOf<Arch> =

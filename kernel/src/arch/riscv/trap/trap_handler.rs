@@ -6,7 +6,7 @@ use crate::{
         riscv::trap::trap_frame::{TrapCause, TrapFrame},
     },
     percpu::PerCoreContext,
-    syscall, task,
+    sched, syscall, task,
 };
 
 #[unsafe(no_mangle)]
@@ -36,7 +36,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             log::info!("print happened");
         }
         TrapCause::TimerInterrupt => {
-            panic!("timer interrupt is hit");
+            sched::timer_interrupt();
         }
         TrapCause::Syscall => {
             // This is a syscall, so we move the return program counter to just after the `ecall`
@@ -45,7 +45,7 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
         }
         TrapCause::Unknown(trap) => {
             panic!(
-                "unknown trap: {trap} (sepc: {}, stvec: {})",
+                "unknown trap: {trap} (sepc: 0x{:x}, stvec: 0x{:x})",
                 riscv::registers::Sepc::read().raw(),
                 riscv::registers::Stvec::read().raw()
             );

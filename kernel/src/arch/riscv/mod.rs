@@ -105,7 +105,7 @@ impl Architecture for Riscv {
         riscv::sbi::set_timer(time_val);
     }
 
-    fn shutdown() {
+    fn halt() {
         riscv::sbi::shutdown();
     }
 }

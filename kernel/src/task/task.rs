@@ -159,18 +159,3 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
     task_ptr
 }
-
-pub fn sleep_current_task() {
-    log::debug!("putting the current task to sleep");
-    let ctxptr = Arch::load_this_cpu_ctx::<PerCoreContext>();
-    log::debug!("ctxptr: {ctxptr:?}");
-    let mut ctx = unsafe { ctxptr.as_mut().expect("per cpu ctx is valid") };
-    log::debug!("got the core ctx");
-
-    let mut current_task = unsafe { ctx.currently_running_task.as_mut() };
-    current_task.state = TaskState::Sleeping;
-    task::add_sleeping_task(ctx.currently_running_task);
-
-    log::debug!("added the sleeping task");
-    sched::schedule();
-}
