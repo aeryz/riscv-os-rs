@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use crate::mm::KERNEL_DIRECT_MAPPING_BASE;
 
 const UART_IER: usize = 1;

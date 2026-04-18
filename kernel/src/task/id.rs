@@ -15,6 +15,7 @@ impl Pid {
         Pid(PID_COUNTER.fetch_add(1, Ordering::Acquire))
     }
 
+    #[allow(unused)]
     pub const fn raw(&self) -> usize {
         self.0
     }

@@ -1,7 +1,7 @@
 use crate::{
     Arch,
     arch::{Architecture, TrapFrame, TrapFrameOf},
-    sched, task,
+    percpu, sched,
 };
 
 pub const SYSCALL_WRITE: usize = 1;
@@ -27,6 +27,13 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
             let utf8_str =
                 unsafe { str::from_utf8_unchecked(core::slice::from_raw_parts(buf, count)) };
 
+            let this_ctx = unsafe {
+                Arch::load_this_cpu_ctx::<percpu::PerCoreContext>()
+                    .as_ref()
+                    .unwrap()
+            };
+
+            log::info!("this syscall is called by {}", this_ctx.core_id);
             crate::printk(utf8_str);
 
             tf.set_syscall_return_value(count);

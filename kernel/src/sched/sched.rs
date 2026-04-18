@@ -5,7 +5,6 @@ use ksync::SpinLock;
 use crate::{
     Arch,
     arch::{Architecture, ContextOf, TrapFrame},
-    mm,
     percpu::{self, PerCoreContext},
     task::{Task, TaskState},
 };
@@ -45,7 +44,7 @@ pub fn init_per_core_scheduler() -> PerCoreScheduler {
 /// This does not guarantee that the currently running task will change. If there are no runnable
 /// tasks and the currently running task is `Ready`, it will continue to run.
 pub fn schedule() {
-    log::debug!("Scheduling..");
+    log::trace!("Scheduling..");
     let ctx = unsafe {
         Arch::load_this_cpu_ctx::<PerCoreContext>()
             .as_mut()
@@ -67,7 +66,7 @@ pub fn schedule() {
             unsafe {
                 if current_task.as_ref().state == TaskState::Ready && current_task != ctx.idle_task
                 {
-                    sched.runqueue.push_back(current_task);
+                    sched.runqueue.push_back(current_task).unwrap();
                 }
             }
 
@@ -136,7 +135,7 @@ pub fn enqueue_new_task(mut task: NonNull<Task>) {
         (*task.as_mut().trap_frame).set_per_core_ctx(core_ctx as *const PerCoreContext as usize);
     }
 
-    core_ctx.scheduler.lock().runqueue.push_back(task);
+    core_ctx.scheduler.lock().runqueue.push_back(task).unwrap();
 }
 
 pub fn timer_interrupt() {
@@ -156,9 +155,9 @@ pub fn timer_interrupt() {
         let mut i = 0;
         while i < scheduler.sleeping_tasks.len() {
             let should_remove = {
-                let mut task = unsafe { scheduler.sleeping_tasks[i].as_mut() };
+                let task = unsafe { scheduler.sleeping_tasks[i].as_mut() };
                 if current_time >= task.wake_up_at {
-                    log::warn!(
+                    log::trace!(
                         "task should wake up at: {} and the cur is {current_time}, so we switch",
                         task.wake_up_at
                     );
@@ -172,9 +171,9 @@ pub fn timer_interrupt() {
             };
 
             if should_remove {
-                log::info!("time is up, putting back to the runqueue");
+                log::trace!("time is up, putting back to the runqueue");
                 let task = scheduler.sleeping_tasks.remove(i);
-                scheduler.runqueue.push_back(task);
+                scheduler.runqueue.push_back(task).unwrap();
             }
         }
     }
@@ -204,7 +203,7 @@ pub fn sleep_current_task(time_ms: usize) {
             .expect("expected a valid reference to the per-CPU context")
     };
 
-    let mut current_task = unsafe { ctx.currently_running_task.as_mut() };
+    let current_task = unsafe { ctx.currently_running_task.as_mut() };
     current_task.state = TaskState::Sleeping;
     // Setting an invalid time s.t. it overflows will result in this task to be immediately woken up after a single time slice
     // TODO(aeryz): check posix to see how they handle overflows
@@ -217,7 +216,8 @@ pub fn sleep_current_task(time_ms: usize) {
     ctx.scheduler
         .lock()
         .sleeping_tasks
-        .push(ctx.currently_running_task);
+        .push(ctx.currently_running_task)
+        .unwrap();
 
     schedule();
 }

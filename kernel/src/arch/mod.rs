@@ -78,7 +78,9 @@ pub trait MemoryModel {
 
     type VirtualAddress: Into<usize>;
 
-    fn set_root_page_table(pa: Self::PhysicalAddress);
+    fn set_root_page_table_pa(pa: Self::PhysicalAddress);
+
+    fn set_root_page_table(val: usize);
 
     fn get_root_page_table() -> usize;
 }

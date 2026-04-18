@@ -115,11 +115,15 @@ impl MemoryModel for Riscv {
 
     type VirtualAddress = VirtualAddress;
 
-    fn set_root_page_table(pa: Self::PhysicalAddress) {
-        mmu::set_root_page_table(pa);
+    fn set_root_page_table_pa(pa: Self::PhysicalAddress) {
+        mmu::set_root_page_table_pa(pa);
     }
 
     fn get_root_page_table() -> usize {
         Satp::read().raw() as usize
+    }
+
+    fn set_root_page_table(val: usize) {
+        mmu::set_root_page_table(val);
     }
 }

@@ -65,9 +65,9 @@ pub fn early_init() {
         unsafe { PhysicalAddress::from_raw_unchecked(&*root_pt as *const PageTable as usize) }
     };
 
-    Arch::set_root_page_table(root_pt_ptr);
+    Arch::set_root_page_table_pa(root_pt_ptr);
 
-    Arch::bump_sp(mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw());
+    Arch::bump_sp(mm::KERNEL_DIRECT_MAPPING_BASE.raw());
 }
 
 /// Maps the whole memory starting from `mm::KERNEL_DIRECT_MAPPING_BASE` and maps the kernel text as executable
