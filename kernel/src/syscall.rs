@@ -1,7 +1,7 @@
 use crate::{
     Arch,
     arch::{Architecture, TrapFrame, TrapFrameOf},
-    task,
+    sched, task,
 };
 
 pub const SYSCALL_WRITE: usize = 1;
@@ -32,7 +32,8 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
             tf.set_syscall_return_value(count);
         }
         SYSCALL_SLEEP_MS => {
-            task::sleep_current_task();
+            let time_ms = tf.get_arg::<0>();
+            sched::sleep_current_task(time_ms);
         }
         _ => unreachable!(),
     }

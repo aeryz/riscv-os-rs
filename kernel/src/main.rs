@@ -93,7 +93,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     loop {
-        Arch::shutdown();
+        Arch::halt();
     }
 }
 
