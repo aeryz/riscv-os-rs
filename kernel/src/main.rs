@@ -35,18 +35,18 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
     Arch::init_trap_handler();
-    log::info!("trap handler initiated");
+    log::trace!("trap handler initiated");
 
     Arch::init_uart(hartid);
-    log::info!("uart initiated");
+    log::trace!("uart initiated");
 
     uart::enable_interrupts();
-    log::info!("uart interrupts enabled");
+    log::trace!("uart interrupts enabled");
 
     let idle_task = task::create_kernel_task(
         VirtualAddress::from_raw(idle_task_main as *const () as usize).unwrap(),
     );
-    log::info!("idle task created");
+    log::trace!("idle task created");
 
     let mut core_ctxs = heapless::Vec::new();
     core_ctxs.push(percpu::PerCoreContext {
@@ -56,26 +56,27 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
         idle_task,
     });
     percpu::set_core_ctxs(core_ctxs);
-    log::info!("per cpu data is set");
+    log::trace!("per cpu data is set");
 
     let task_1 = task::create_task(
         VirtualAddress::from_raw(userspace::userspace_sleep_print_loop as *const () as usize)
             .unwrap(),
     );
-    log::info!("task 1 is created");
+    log::trace!("task 1 is created");
     let task_2 = task::create_task(
         VirtualAddress::from_raw(userspace::userspace_sleep_print_loop2 as *const () as usize)
             .unwrap(),
     );
-    log::info!("task 2 is created");
-
-    log::info!("Core state: {:#?}", percpu::get_core(0));
+    log::trace!("task 2 is created");
 
     Arch::set_per_cpu_ctx_ptr(
         VirtualAddress::from_raw(percpu::get_core(0) as *const percpu::PerCoreContext as usize)
             .unwrap(),
     );
     Arch::setup_unpriviledged_mode();
+
+    let time = Arch::read_current_time();
+    Arch::set_timer(time + Arch::nanos_to_ticks(32 * 1_000_000));
 
     Arch::enable_interrupts();
 
@@ -92,7 +93,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
     }
 
     loop {
-        core::hint::spin_loop();
+        Arch::shutdown();
     }
 }
 

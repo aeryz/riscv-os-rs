@@ -49,6 +49,22 @@ fn sbi_call1(eid: usize, fid: usize, arg0: usize) -> SbiRet {
     SbiRet { error, value }
 }
 
+#[inline(always)]
+fn sbi_call0(eid: usize, fid: usize) -> SbiRet {
+    let error: isize;
+    let value: isize;
+    unsafe {
+        core::arch::asm!(
+            "ecall",
+            out("a0") error,
+            out("a1") value,
+            in("a6") fid,
+            in("a7") eid,
+        );
+    }
+    SbiRet { error, value }
+}
+
 pub const SBI_EXT_HSM: usize = 0x48534D;
 pub const SBI_HSM_HART_START: usize = 0;
 
@@ -69,4 +85,8 @@ pub fn console_putchar(c: u8) {
 
 pub fn set_timer(time_val: usize) {
     let _ = sbi_call1(0x0, 0, time_val);
+}
+
+pub fn shutdown() {
+    let _ = sbi_call0(0x8, 0);
 }
