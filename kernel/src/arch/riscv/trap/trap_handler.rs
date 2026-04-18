@@ -41,6 +41,12 @@ extern "C" fn trap_handler(trap_frame: &mut TrapFrame) {
             trap_frame.sepc += 4;
             syscall::dispatch_syscall(trap_frame);
         }
-        TrapCause::Unknown(trap) => {}
+        TrapCause::Unknown(trap) => {
+            panic!(
+                "unknown trap: {trap} (sepc: {}, stvec: {})",
+                riscv::registers::Sepc::read().raw(),
+                riscv::registers::Stvec::read().raw()
+            );
+        }
     }
 }

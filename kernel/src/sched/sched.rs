@@ -4,7 +4,7 @@ use ksync::SpinLock;
 
 use crate::{
     Arch,
-    arch::{Architecture, ContextOf},
+    arch::{Architecture, ContextOf, TrapFrame},
     mm,
     percpu::{self, PerCoreContext},
     task::{Task, TaskState},
@@ -51,6 +51,7 @@ pub fn schedule() {
     };
 
     let mut sched = ctx.scheduler.lock();
+    log::trace!("sched queue len: {}", sched.runqueue.len());
     match sched.runqueue.pop_front() {
         Some(mut task) => {
             log::debug!("rq is not empty, switching to the next task");
@@ -60,13 +61,20 @@ pub fn schedule() {
             new_task.state = TaskState::Running;
 
             ctx.currently_running_task = NonNull::new(new_task).expect("the task is nonnull");
-            sched.runqueue.push_back(current_task);
+
+            unsafe {
+                if current_task.as_ref().state == TaskState::Ready && current_task != ctx.idle_task
+                {
+                    sched.runqueue.push_back(current_task);
+                }
+            }
 
             log::debug!(
                 "the new process's root page table is: 0x{:x}",
                 new_task.address_space.root_pt.raw()
             );
 
+            drop(sched);
             Arch::switch_to_user(
                 unsafe { (&mut current_task.as_mut().context) as *mut ContextOf<Arch> },
                 (&new_task.context) as *const ContextOf<Arch>,
@@ -79,15 +87,19 @@ pub fn schedule() {
             // If there are no tasks that we can run and the currently running task can continue to be run,
             // we just run it. This also covers if the current_task is the idle task.
             if current_task.state == TaskState::Ready {
+                log::debug!("current task is still ready, we don't switch to the idle task");
                 // TODO(aeryz): set last entrance time??
                 current_task.state = TaskState::Running;
                 return;
             }
+            log::debug!("current task is not ready, we are gonna switch to idle task");
 
             ctx.currently_running_task = ctx.idle_task;
             let idle_task = unsafe { ctx.idle_task.as_mut() };
             idle_task.state = TaskState::Running;
+            log::debug!("idle task is set to running");
 
+            drop(sched);
             Arch::switch_to(
                 (&mut current_task.context) as *mut ContextOf<Arch>,
                 (&idle_task.context) as *const ContextOf<Arch>,
@@ -99,7 +111,7 @@ pub fn schedule() {
 /// Enqueues a new task to one of the runqueues.
 ///
 /// The runqueue selection is round robin as well.
-pub fn enqueue_new_task(task: NonNull<Task>) {
+pub fn enqueue_new_task(mut task: NonNull<Task>) {
     let idx = {
         let mut scheduler_ctx = SCHEDULER_CTX.lock();
 
@@ -112,11 +124,13 @@ pub fn enqueue_new_task(task: NonNull<Task>) {
         scheduler_ctx.last_rq_hart_idx
     };
 
-    percpu::get_core(idx)
-        .scheduler
-        .lock()
-        .runqueue
-        .push_back(task);
+    let core_ctx = percpu::get_core(idx);
+
+    unsafe {
+        (*task.as_mut().trap_frame).set_per_core_ctx(core_ctx as *const PerCoreContext as usize);
+    }
+
+    core_ctx.scheduler.lock().runqueue.push_back(task);
 }
 
 impl core::fmt::Debug for PerCoreScheduler {

@@ -7,6 +7,7 @@ use crate::{
         mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
     },
     mm::{self, KERNEL_DIRECT_MAPPING_BASE},
+    percpu::PerCoreContext,
     sched,
     task::{self, ADDRESS_SPACE_EMPTY, AddressSpace, Pid, TaskState, VmRegion},
 };
@@ -23,6 +24,7 @@ pub struct Task {
     pub pid: Pid,
     /// Kernel stack pointer
     pub kernel_sp: VirtualAddressOf<Arch>,
+    pub trap_frame: *mut TrapFrameOf<Arch>,
     /// Pointer to the context
     pub context: ContextOf<Arch>,
     /// The current state of the process
@@ -42,12 +44,13 @@ pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
         VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
 
     // TODO(aeryz): I don't like this
-    let kernel_sp = VirtualAddress::from_raw(kernel_stack_va.raw() + 0x3fa).unwrap();
+    let kernel_sp = VirtualAddress::from_raw(kernel_stack_va.raw() + 0xfa0).unwrap();
     let context = ContextOf::<Arch>::initialize(entry, kernel_sp);
 
     task::add_task(Task {
         pid: Pid::create_next(),
         kernel_sp,
+        trap_frame: core::ptr::null_mut(),
         context,
         state: TaskState::Ready,
         wake_up_at: 0,
@@ -103,9 +106,11 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
         });
     }
 
-    let kernel_stack_pa = {
+    let mut kernel_stack_pa = PhysicalAddress::ZERO;
+    // 16K kernel stack
+    for i in 0..4 {
         let kernel_stack = mm::alloc().unwrap();
-        let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000).unwrap();
+        let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000 + 0x1000 * i).unwrap();
 
         address_space.regions.push(VmRegion {
             start: kernel_stack_va,
@@ -115,11 +120,11 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
         unsafe { (*process_root_table).map_vm(kernel_stack_va, kernel_stack, PteFlags::RW) };
 
-        kernel_stack
-    };
+        kernel_stack_pa = kernel_stack;
+    }
 
     let kernel_view_of_the_users_kernel_stack =
-        kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0x3fa;
+        kernel_stack_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw() + 0xfa0;
 
     let trap_frame_ptr = VirtualAddress::from_raw(
         kernel_view_of_the_users_kernel_stack - size_of::<TrapFrameOf<Arch>>(),
@@ -133,16 +138,16 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
     let context = ContextOf::<Arch>::initialize(
         Arch::trap_resume_ptr(),
-        VirtualAddress::from_raw(0x0000_0000_4fff_03fa - size_of::<TrapFrameOf<Arch>>()).unwrap(),
+        VirtualAddress::from_raw(0x0000_0000_4fff_3fa0 - size_of::<TrapFrameOf<Arch>>()).unwrap(),
     );
 
     mm::kvm_full_map(unsafe { process_root_table.as_mut().unwrap() });
 
     let task_ptr = task::add_task(Task {
         pid: Pid::create_next(),
-        kernel_sp: VirtualAddress::from_raw(0x0000_0000_4fff_03fa)
+        kernel_sp: VirtualAddress::from_raw(0x0000_0000_4fff_3fa0)
             .expect("virtual address is valid"),
-        // trap_frame: trap_frame_ptr.as_ptr_mut(),
+        trap_frame: trap_frame_ptr.as_ptr_mut(),
         context,
         state: TaskState::Ready,
         wake_up_at: 0,
@@ -153,4 +158,19 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     sched::enqueue_new_task(task_ptr);
 
     task_ptr
+}
+
+pub fn sleep_current_task() {
+    log::debug!("putting the current task to sleep");
+    let ctxptr = Arch::load_this_cpu_ctx::<PerCoreContext>();
+    log::debug!("ctxptr: {ctxptr:?}");
+    let mut ctx = unsafe { ctxptr.as_mut().expect("per cpu ctx is valid") };
+    log::debug!("got the core ctx");
+
+    let mut current_task = unsafe { ctx.currently_running_task.as_mut() };
+    current_task.state = TaskState::Sleeping;
+    task::add_sleeping_task(ctx.currently_running_task);
+
+    log::debug!("added the sleeping task");
+    sched::schedule();
 }
