@@ -1,5 +1,3 @@
-use core::cell::OnceCell;
-
 use ksync::SpinLock;
 
 use crate::arch::mmu::PhysicalAddress;
@@ -19,6 +17,7 @@ pub fn alloc() -> Result<PhysicalAddress, ()> {
     ALLOCATOR.lock().alloc()
 }
 
+#[allow(unused)]
 /// Free a single 4k page.
 pub fn free(ptr: PhysicalAddress) {
     ALLOCATOR.lock().free(ptr)

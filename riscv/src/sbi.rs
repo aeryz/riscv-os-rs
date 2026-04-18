@@ -17,6 +17,7 @@ fn sbi_call3(eid: usize, fid: usize, arg0: usize, arg1: usize, arg2: usize) -> S
     SbiRet { error, value }
 }
 
+#[allow(unused)]
 #[inline(always)]
 fn sbi_call2(eid: usize, fid: usize, arg0: usize, arg1: usize) -> SbiRet {
     let error: isize;

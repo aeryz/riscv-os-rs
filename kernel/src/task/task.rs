@@ -7,7 +7,6 @@ use crate::{
         mmu::{PageTable, PhysicalAddress, PteFlags, VirtualAddress},
     },
     mm::{self, KERNEL_DIRECT_MAPPING_BASE},
-    percpu::PerCoreContext,
     sched,
     task::{self, ADDRESS_SPACE_EMPTY, AddressSpace, Pid, TaskState, VmRegion},
 };
@@ -86,7 +85,7 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
                 PteFlags::RX | PteFlags::U,
             );
         }
-        address_space.regions.push(VmRegion {
+        let _ = address_space.regions.push(VmRegion {
             start: va,
             end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
             process_owned: false,
@@ -99,7 +98,7 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
         let va = VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap();
         unsafe { (*process_root_table).map_vm(va, user_stack, PteFlags::RW | PteFlags::U) };
-        address_space.regions.push(VmRegion {
+        let _ = address_space.regions.push(VmRegion {
             start: va,
             end: VirtualAddress::from_raw(va.raw() + 4096).unwrap(),
             process_owned: true,
@@ -112,7 +111,7 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
         let kernel_stack = mm::alloc().unwrap();
         let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000 + 0x1000 * i).unwrap();
 
-        address_space.regions.push(VmRegion {
+        let _ = address_space.regions.push(VmRegion {
             start: kernel_stack_va,
             end: VirtualAddress::from_raw(kernel_stack_va.raw() + 4096).unwrap(),
             process_owned: true,

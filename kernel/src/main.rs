@@ -1,7 +1,6 @@
 #![no_std]
 #![no_main]
 #![allow(static_mut_refs)]
-#![allow(unused)]
 
 #[cfg(feature = "riscv-sbi")]
 pub type Arch = arch::Riscv;
@@ -16,8 +15,6 @@ mod serial_log;
 mod syscall;
 mod task;
 mod userspace;
-
-use core::ptr::NonNull;
 
 pub use debug::*;
 use ksync::SpinLock;
@@ -34,43 +31,121 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
+    let mut core_ctxs = heapless::Vec::new();
+
+    setup_core(0, &mut core_ctxs);
+    setup_core(1, &mut core_ctxs);
+    setup_core(2, &mut core_ctxs);
+
+    percpu::set_core_ctxs(core_ctxs);
+
+    let _ = task::create_task(unsafe {
+        VirtualAddress::from_raw_unchecked(
+            userspace::userspace_sleep_print_loop_1 as *const () as usize,
+        )
+    });
+    let _ = task::create_task(unsafe {
+        VirtualAddress::from_raw_unchecked(
+            userspace::userspace_sleep_print_loop_2 as *const () as usize,
+        )
+    });
+    let _ = task::create_task(unsafe {
+        VirtualAddress::from_raw_unchecked(
+            userspace::userspace_sleep_print_loop_3 as *const () as usize,
+        )
+    });
+    let _ = task::create_task(unsafe {
+        VirtualAddress::from_raw_unchecked(
+            userspace::userspace_sleep_print_loop_4 as *const () as usize,
+        )
+    });
+
+    boot_core(1);
+    boot_core(2);
+    core_boot_entry(0);
+}
+
+fn setup_core(
+    core_id: usize,
+    core_ctxs: &mut heapless::Vec<percpu::PerCoreContext, { percpu::MAX_CORES }>,
+) {
+    let idle_task = task::create_kernel_task(
+        VirtualAddress::from_raw(idle_task_main as *const () as usize).unwrap(),
+    );
+
+    core_ctxs
+        .push(percpu::PerCoreContext {
+            core_id,
+            scheduler: SpinLock::new(sched::init_per_core_scheduler()),
+            currently_running_task: idle_task,
+            idle_task,
+        })
+        .unwrap();
+}
+
+fn boot_core(core: usize) {
+    let mut sp = mm::alloc().unwrap().raw() + 0xff0;
+
+    sp = sp - size_of::<usize>();
+
+    unsafe {
+        let sp_kernel_view = sp + mm::KERNEL_DIRECT_MAPPING_BASE.raw();
+        *(sp_kernel_view as *mut usize) = Arch::get_root_page_table();
+    }
+
+    let ret = riscv::sbi::hart_start(
+        core,
+        core_entry_trampoline as *const () as usize
+            - (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()),
+        sp,
+    );
+
+    if ret.error == 0 {
+        log::info!("core {core} started successfully");
+    } else {
+        log::error!("core {core} start failure");
+        panic!();
+    }
+}
+
+// TODO(aeryz): This contains arch specific code, move it to `arch/boot`
+#[unsafe(naked)]
+extern "C" fn core_entry_trampoline() -> ! {
+    core::arch::naked_asm!(
+        r#"
+        mv sp, a1
+        ld a2, 0(sp)
+
+        csrw satp, a2
+        sfence.vma
+
+        li t0, {kernel_offset}
+        la t1, core_boot_entry
+        add t0, t0, t1
+
+        li t1, {kernel_direct_mapping_base}
+        add sp, sp, t1
+
+        jr t0
+        "#,
+        kernel_offset = const (mm::KERNEL_IMAGE_START_VA.raw() - mm::KERNEL_IMAGE_START_PA.raw()),
+        kernel_direct_mapping_base = const (mm::KERNEL_DIRECT_MAPPING_BASE.raw()),
+    )
+}
+
+#[unsafe(no_mangle)]
+extern "C" fn core_boot_entry(core: usize) -> ! {
     Arch::init_trap_handler();
     log::trace!("trap handler initiated");
 
-    Arch::init_uart(hartid);
+    Arch::init_uart(core);
     log::trace!("uart initiated");
 
     uart::enable_interrupts();
     log::trace!("uart interrupts enabled");
 
-    let idle_task = task::create_kernel_task(
-        VirtualAddress::from_raw(idle_task_main as *const () as usize).unwrap(),
-    );
-    log::trace!("idle task created");
-
-    let mut core_ctxs = heapless::Vec::new();
-    core_ctxs.push(percpu::PerCoreContext {
-        core_id: 0,
-        scheduler: SpinLock::new(sched::init_per_core_scheduler()),
-        currently_running_task: idle_task,
-        idle_task,
-    });
-    percpu::set_core_ctxs(core_ctxs);
-    log::trace!("per cpu data is set");
-
-    let task_1 = task::create_task(
-        VirtualAddress::from_raw(userspace::userspace_sleep_print_loop as *const () as usize)
-            .unwrap(),
-    );
-    log::trace!("task 1 is created");
-    let task_2 = task::create_task(
-        VirtualAddress::from_raw(userspace::userspace_sleep_print_loop2 as *const () as usize)
-            .unwrap(),
-    );
-    log::trace!("task 2 is created");
-
     Arch::set_per_cpu_ctx_ptr(
-        VirtualAddress::from_raw(percpu::get_core(0) as *const percpu::PerCoreContext as usize)
+        VirtualAddress::from_raw(percpu::get_core(core) as *const percpu::PerCoreContext as usize)
             .unwrap(),
     );
     Arch::setup_unpriviledged_mode();

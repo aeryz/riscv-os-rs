@@ -1,5 +1,5 @@
 use core::fmt::{self, Write};
-use log::{Level, Metadata, Record};
+use log::{Metadata, Record};
 
 use crate::printk;
 
@@ -69,10 +69,6 @@ struct BufWriter<'a> {
 impl<'a> BufWriter<'a> {
     fn new(buf: &'a mut [u8]) -> Self {
         Self { buf, pos: 0 }
-    }
-
-    fn as_str(&self) -> &str {
-        core::str::from_utf8(&self.buf[..self.pos]).unwrap_or("<utf8 err>")
     }
 }
 

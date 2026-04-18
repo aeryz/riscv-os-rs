@@ -10,6 +10,7 @@ pub const ADDRESS_SPACE_EMPTY: AddressSpace = AddressSpace {
     regions: heapless::Vec::new(),
 };
 
+#[allow(unused)]
 #[derive(Clone)]
 pub struct VmRegion {
     /// Start address of this region
