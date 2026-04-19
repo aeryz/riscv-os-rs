@@ -18,3 +18,4 @@ cc = "1"
 default = [ "riscv-sbi" ]
 riscv-sbi = [ "sv39" ]
 sv39 = []
+multi-core = []

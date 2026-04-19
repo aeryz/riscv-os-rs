@@ -5,5 +5,6 @@ mod mappings;
 
 #[allow(unused)]
 pub use frame_allocator::{alloc_frame, free_frame};
+pub use kernel_allocator::{kfree, kmalloc};
 pub use kvm::*;
 pub use mappings::*;
