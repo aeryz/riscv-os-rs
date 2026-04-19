@@ -5,9 +5,9 @@ use crate::{
     Arch,
     arch::{
         Architecture, MemoryModel,
-        mmu::{PageTable, PageTableEntry, PhysicalAddress, PteFlags},
+        mmu::{PageTable, PageTableEntry, PhysicalAddress, PteFlags, VirtualAddress},
     },
-    mm::{self, allocator},
+    mm::{self, frame_allocator, kernel_allocator},
 };
 use ksync::SpinLock;
 
@@ -44,7 +44,7 @@ pub fn early_init() {
     // TODO(aeryz): We want to have a separate spot for the allocatable memory.
     let memory_start =
         unsafe { PhysicalAddress::from_raw_unchecked(&__kernel_end as *const u8 as usize) };
-    allocator::init(memory_start);
+    frame_allocator::init(memory_start);
 
     let text_end = unsafe { &__text_end as *const u8 as usize };
     let mut text_start =
@@ -66,6 +66,24 @@ pub fn early_init() {
     };
 
     Arch::set_root_page_table_pa(root_pt_ptr);
+
+    // 64K kernel heap
+    {
+        // TODO(aeryz): This depends on the assumption that the frame allocator will provide contiguous
+        // memory
+        let start_addr = frame_allocator::alloc_frame().unwrap();
+        for _ in 0..14 {
+            let _ = frame_allocator::alloc_frame().unwrap();
+        }
+        let end_addr = frame_allocator::alloc_frame().unwrap();
+
+        kernel_allocator::init(
+            VirtualAddress::from_raw(start_addr.raw() + mm::KERNEL_DIRECT_MAPPING_BASE.raw())
+                .unwrap(),
+            VirtualAddress::from_raw(end_addr.raw() + 4096 + mm::KERNEL_DIRECT_MAPPING_BASE.raw())
+                .unwrap(),
+        );
+    }
 
     Arch::bump_sp(mm::KERNEL_DIRECT_MAPPING_BASE.raw());
 }

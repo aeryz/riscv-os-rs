@@ -37,7 +37,7 @@ pub fn init(start_addr: VirtualAddressOf<Arch>, end_addr: VirtualAddressOf<Arch>
     allocator_node.free = true;
 }
 
-pub fn kalloc(sz: usize) -> VirtualAddressOf<Arch> {
+pub fn kmalloc(sz: usize) -> VirtualAddressOf<Arch> {
     let allocator = ALLOCATOR.lock();
     let mut cur_node_ptr = allocator.root;
     loop {

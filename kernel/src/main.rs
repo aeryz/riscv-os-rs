@@ -22,6 +22,7 @@ use ksync::SpinLock;
 use crate::{
     arch::{Architecture, MemoryModel, mmu::VirtualAddress},
     driver::uart,
+    mm::kmalloc,
 };
 
 core::arch::global_asm!(include_str!("start.s"));
@@ -31,11 +32,28 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
+    let alloc1 = kmalloc(100);
+    let alloc2 = kmalloc(200);
+    let alloc3 = kmalloc(300);
+    log::info!(
+        "Allocated addresses: 0x{:x}, 0x{:x}, 0x{:x}\nSize diffs: 1-2({}), 2-3({})",
+        alloc1.raw(),
+        alloc2.raw(),
+        alloc3.raw(),
+        alloc2.raw() - alloc1.raw(),
+        alloc3.raw() - alloc2.raw(),
+    );
+
+    panic!("");
+
     let mut core_ctxs = heapless::Vec::new();
 
     setup_core(0, &mut core_ctxs);
-    setup_core(1, &mut core_ctxs);
-    setup_core(2, &mut core_ctxs);
+    #[cfg(feature = "multi-core")]
+    {
+        setup_core(1, &mut core_ctxs);
+        setup_core(2, &mut core_ctxs);
+    }
 
     percpu::set_core_ctxs(core_ctxs);
 
@@ -60,8 +78,11 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
         )
     });
 
-    boot_core(1);
-    boot_core(2);
+    #[cfg(feature = "multi-core")]
+    {
+        boot_core(1);
+        boot_core(2);
+    }
     core_boot_entry(0);
 }
 
@@ -83,6 +104,7 @@ fn setup_core(
         .unwrap();
 }
 
+#[cfg(feature = "multi-core")]
 fn boot_core(core: usize) {
     let mut sp = mm::alloc_frame().unwrap().raw() + 0xff0;
 
