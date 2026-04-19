@@ -38,7 +38,7 @@ pub struct Task {
 }
 
 pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
-    let kernel_stack = mm::alloc().unwrap();
+    let kernel_stack = mm::alloc_frame().unwrap();
     let kernel_stack_va =
         VirtualAddress::from_raw(kernel_stack.raw() + KERNEL_DIRECT_MAPPING_BASE.raw()).unwrap();
 
@@ -60,7 +60,7 @@ pub fn create_kernel_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
 pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     // we first initiate user's root page table
-    let process_root_table_pa = mm::alloc().unwrap();
+    let process_root_table_pa = mm::alloc_frame().unwrap();
     let process_root_table_va =
         VirtualAddress::from_raw(process_root_table_pa.raw() + KERNEL_DIRECT_MAPPING_BASE.raw())
             .unwrap();
@@ -94,7 +94,7 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
 
     // 16K stack
     for i in 0..4 {
-        let user_stack = mm::alloc().unwrap();
+        let user_stack = mm::alloc_frame().unwrap();
 
         let va = VirtualAddress::from_raw(0x0000_0000_3fff_0000 + 0x1000 * i).unwrap();
         unsafe { (*process_root_table).map_vm(va, user_stack, PteFlags::RW | PteFlags::U) };
@@ -108,7 +108,7 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     let mut kernel_stack_pa = PhysicalAddress::ZERO;
     // 16K kernel stack
     for i in 0..4 {
-        let kernel_stack = mm::alloc().unwrap();
+        let kernel_stack = mm::alloc_frame().unwrap();
         let kernel_stack_va = VirtualAddress::from_raw(0x0000_0000_4fff_0000 + 0x1000 * i).unwrap();
 
         let _ = address_space.regions.push(VmRegion {

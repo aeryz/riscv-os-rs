@@ -1,8 +1,9 @@
-mod allocator;
+mod frame_allocator;
+mod kernel_allocator;
 mod kvm;
 mod mappings;
 
 #[allow(unused)]
-pub use allocator::{alloc, free};
+pub use frame_allocator::{alloc_frame, free_frame};
 pub use kvm::*;
 pub use mappings::*;

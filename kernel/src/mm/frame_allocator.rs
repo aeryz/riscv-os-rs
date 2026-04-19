@@ -2,25 +2,25 @@ use ksync::SpinLock;
 
 use crate::arch::mmu::PhysicalAddress;
 
-static ALLOCATOR: SpinLock<Allocator<16>> = SpinLock::new(Allocator::new(unsafe {
+static FRAME_ALLOCATOR: SpinLock<FrameAllocator<16>> = SpinLock::new(FrameAllocator::new(unsafe {
     PhysicalAddress::from_raw_unchecked(0)
 }));
 
 /// Initialize the allocator with the given `start_addr`.
 pub(super) fn init(start_addr: PhysicalAddress) {
-    ALLOCATOR.lock().start_addr = start_addr;
+    FRAME_ALLOCATOR.lock().start_addr = start_addr;
 }
 
 // TODO: be able to allocate a custom amount (will probably have this while implementing sbrk)
 /// Allocate a single 4k page.
-pub fn alloc() -> Result<PhysicalAddress, ()> {
-    ALLOCATOR.lock().alloc()
+pub fn alloc_frame() -> Result<PhysicalAddress, ()> {
+    FRAME_ALLOCATOR.lock().alloc()
 }
 
 #[allow(unused)]
 /// Free a single 4k page.
-pub fn free(ptr: PhysicalAddress) {
-    ALLOCATOR.lock().free(ptr)
+pub fn free_frame(ptr: PhysicalAddress) {
+    FRAME_ALLOCATOR.lock().free(ptr)
 }
 
 /// Dumb allocator
@@ -32,12 +32,12 @@ pub fn free(ptr: PhysicalAddress) {
 /// It just tries to find the next empty table by going through
 /// the `pages` bitfields.
 #[repr(C)]
-struct Allocator<const N: usize> {
+struct FrameAllocator<const N: usize> {
     start_addr: PhysicalAddress,
     pages: [u64; N],
 }
 
-impl<const N: usize> Allocator<N> {
+impl<const N: usize> FrameAllocator<N> {
     #[must_use]
     const fn new(start_addr: PhysicalAddress) -> Self {
         Self {
