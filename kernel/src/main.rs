@@ -84,7 +84,7 @@ fn setup_core(
 }
 
 fn boot_core(core: usize) {
-    let mut sp = mm::alloc().unwrap().raw() + 0xff0;
+    let mut sp = mm::alloc_frame().unwrap().raw() + 0xff0;
 
     sp = sp - size_of::<usize>();
 

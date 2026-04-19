@@ -74,7 +74,7 @@ impl PageTable {
             return (pte.physical_address().raw() + base) as *mut PageTable;
         }
 
-        let pa = mm::alloc().unwrap();
+        let pa = mm::alloc_frame().unwrap();
         let va = VirtualAddress::from_raw(pa.raw() + base).unwrap();
         let page_table_ptr = va.as_ptr_mut();
         unsafe {
