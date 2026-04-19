@@ -1,5 +1,5 @@
 [workspace]
-members = ["kernel", "riscv", "ksync"]
+members = ["kernel", "riscv", "ksync", "kmalloc"]
 resolver = "3"
 
 [workspace.package]
