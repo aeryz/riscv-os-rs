@@ -1,4 +1,9 @@
 #![no_std]
+#![cfg_attr(test, feature(allocator_api, btreemap_alloc))]
+#![cfg_attr(test, allow(static_mut_refs))]
+
+#[cfg(test)]
+extern crate std;
 
 mod linked_list_allocator;
 
