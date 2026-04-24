@@ -1,8 +1,41 @@
-# An experimental RISC-V OS
+# Efiks: An experimental general purpose OS
 
-This OS is mostly for learning purposes. It started as a challenge but one of my primary goals is to also turn this into a series of videos and blog posts.
+# riscv-os-rs
 
-I initially wanted to re-implement the xv6 kernel in Rust but I didn't want to just copy code and instead actually try to live through the pain of building everything from scratch.
+A small operating system written in Rust, built to explore and understand low-level systems design.
+
+## Overview
+
+This project is an experimental OS kernel focused on learning and teaching core operating system concepts. It is written in Rust with an emphasis on correctness, clarity, and explicit control over low-level behavior.
+
+While the architecture is designed to be ISA-independent, the current implementation targets RISC-V.
+
+## Goals
+
+- Build a minimal but realistic OS from first principles
+- Understand core subsystems (memory management, scheduling, traps, syscalls)
+- Provide a clear, inspectable codebase for educational purposes
+- Produce accompanying material explaining design decisions and internals
+
+## Roadmap
+
+- [x] Boot + OpenSBI (M → S mode)
+- [x] Trap handling and context switching
+- [x] Sv39 virtual memory (per-process address spaces)
+- [x] Multicore support (multi-hart)
+- [x] Basic process model + round-robin scheduler
+- [x] Syscalls (`write`, `read`, `sleep`, `exit`)
+- [x] UART driver (console I/O)
+- [x] Simple heap allocator
+- [x] Basic synchronization primitives (spinlocks)
+- [x] Basic filesystem support
+- [ ] Improve memory management (allocator, paging, regions)
+- [ ] Process lifecycle (cleanup, reaper, better scheduling)
+- [ ] Expand syscalls + userspace support (ELF loader)
+- [ ] Improve filesystem (features, robustness)
+- [ ] Device support (e.g. VirtIO)
+- [ ] Strengthen ISA abstraction (beyond RISC-V)
+- [ ] Write accompanying educational content
 
 ## Running
 
@@ -19,17 +52,22 @@ Or just:
 nix develop
 ```
 
+### Build the sbi bootloader
+
+```
+nix build .#opensbi
+```
+
 ### Run the OS
 ```
-qemu-system-riscv64 \
-  -nographic \
-  -machine virt \
-  -bios target/riscv64gc-unknown-none-elf/release/kernel
+RUST_LOG=info cargo b \
+  && qemu-system-riscv64 \
+      -smp 4 \
+      -nographic \
+      -machine virt \
+      -bios ./result/share/opensbi/lp64/generic/firmware/fw_dynamic.bin \
+      -kernel target/riscv64gc-unknown-none-elf/release/kernel
 ```
-
-## Non-exhaustive list of the roadmap
-
-TBD
 
 ## Resources
 
