@@ -1,10 +1,9 @@
 use core::{cell::OnceCell, ptr::NonNull};
 
+use alloc::vec::Vec;
 use ksync::SpinLock;
 
 use crate::{sched::PerCoreScheduler, task::Task};
-
-pub const MAX_CORES: usize = 16;
 
 static CORES: CoreTable = CoreTable(OnceCell::new());
 
@@ -24,7 +23,7 @@ pub struct PerCoreContext {
 // we really need to think more about this.
 unsafe impl Send for PerCoreContext {}
 
-struct CoreTable(OnceCell<heapless::Vec<PerCoreContext, MAX_CORES>>);
+struct CoreTable(OnceCell<Vec<PerCoreContext>>);
 
 /// SAFETY:
 /// CoreTable is a fixed table that will be initialized with the cores once and won't be mutated
@@ -32,7 +31,7 @@ struct CoreTable(OnceCell<heapless::Vec<PerCoreContext, MAX_CORES>>);
 unsafe impl Send for CoreTable {}
 unsafe impl Sync for CoreTable {}
 
-pub fn set_core_ctxs(ctx: heapless::Vec<PerCoreContext, MAX_CORES>) {
+pub fn set_core_ctxs(ctx: Vec<PerCoreContext>) {
     CORES.0.get_or_init(|| ctx);
 }
 
