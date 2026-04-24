@@ -22,7 +22,7 @@ pub use debug::*;
 use ksync::SpinLock;
 
 use crate::{
-    arch::{Architecture, MemoryModel, mmu::VirtualAddress},
+    arch::{Architecture, mmu::VirtualAddress},
     driver::uart,
     mm::kmalloc,
 };
