@@ -1,7 +1,5 @@
 # Efiks: An experimental general purpose OS
 
-# riscv-os-rs
-
 A small operating system written in Rust, built to explore and understand low-level systems design.
 
 ## Overview
