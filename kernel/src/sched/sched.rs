@@ -1,5 +1,6 @@
 use core::ptr::NonNull;
 
+use alloc::collections::vec_deque::VecDeque;
 use ksync::SpinLock;
 
 use crate::{
@@ -22,7 +23,7 @@ pub struct GlobalScheduler {
 #[repr(C)]
 pub struct PerCoreScheduler {
     /// The list of the runnable tasks for this hart.
-    runqueue: heapless::Deque<NonNull<Task>, MAX_TASK_COUNT>,
+    runqueue: VecDeque<NonNull<Task>>,
     /// The list of sleeping tasks that start sleeping when it was running on this core
     sleeping_tasks: heapless::Vec<NonNull<Task>, MAX_TASK_COUNT>,
     /// The time when the currently running process started running.
@@ -31,7 +32,7 @@ pub struct PerCoreScheduler {
 
 pub fn init_per_core_scheduler() -> PerCoreScheduler {
     PerCoreScheduler {
-        runqueue: heapless::Deque::new(),
+        runqueue: VecDeque::new(),
         sleeping_tasks: heapless::Vec::new(),
         last_entrance_time: 0,
     }
@@ -66,7 +67,7 @@ pub fn schedule() {
             unsafe {
                 if current_task.as_ref().state == TaskState::Ready && current_task != ctx.idle_task
                 {
-                    sched.runqueue.push_back(current_task).unwrap();
+                    sched.runqueue.push_back(current_task);
                 }
             }
 
@@ -135,7 +136,7 @@ pub fn enqueue_new_task(mut task: NonNull<Task>) {
         (*task.as_mut().trap_frame).set_per_core_ctx(core_ctx as *const PerCoreContext as usize);
     }
 
-    core_ctx.scheduler.lock().runqueue.push_back(task).unwrap();
+    core_ctx.scheduler.lock().runqueue.push_back(task);
 }
 
 pub fn timer_interrupt() {
@@ -173,7 +174,7 @@ pub fn timer_interrupt() {
             if should_remove {
                 log::trace!("time is up, putting back to the runqueue");
                 let task = scheduler.sleeping_tasks.remove(i);
-                scheduler.runqueue.push_back(task).unwrap();
+                scheduler.runqueue.push_back(task);
             }
         }
     }

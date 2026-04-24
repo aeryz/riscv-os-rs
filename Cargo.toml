@@ -9,3 +9,4 @@ edition = "2024"
 [workspace.dependencies]
 riscv = { path = "./riscv", default-features = false }
 ksync = { path = "./ksync", default-features = false }
+kmalloc = { path = "./kmalloc", default-features = false }
