@@ -29,13 +29,3 @@ unsafe impl GlobalAlloc for Allocator {
         unsafe { self.0.lock().assume_init_ref().dealloc(ptr, layout) }
     }
 }
-
-#[allow(unused)]
-pub fn kmalloc(_sz: usize) -> VirtualAddressOf<Arch> {
-    todo!()
-}
-
-#[allow(unused)]
-pub fn kfree(_ptr: VirtualAddressOf<Arch>) {
-    todo!()
-}
