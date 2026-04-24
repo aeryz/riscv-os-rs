@@ -1,6 +1,6 @@
 use core::ptr::NonNull;
 
-use alloc::collections::vec_deque::VecDeque;
+use alloc::{collections::vec_deque::VecDeque, vec::Vec};
 use ksync::SpinLock;
 
 use crate::{
@@ -9,8 +9,6 @@ use crate::{
     percpu::{self, PerCoreContext},
     task::{Task, TaskState},
 };
-
-pub const MAX_TASK_COUNT: usize = 32;
 
 static SCHEDULER_CTX: SpinLock<GlobalScheduler> = SpinLock::new(GlobalScheduler {
     last_rq_hart_idx: 0,
@@ -25,7 +23,7 @@ pub struct PerCoreScheduler {
     /// The list of the runnable tasks for this hart.
     runqueue: VecDeque<NonNull<Task>>,
     /// The list of sleeping tasks that start sleeping when it was running on this core
-    sleeping_tasks: heapless::Vec<NonNull<Task>, MAX_TASK_COUNT>,
+    sleeping_tasks: Vec<NonNull<Task>>,
     /// The time when the currently running process started running.
     last_entrance_time: usize,
 }
@@ -33,7 +31,7 @@ pub struct PerCoreScheduler {
 pub fn init_per_core_scheduler() -> PerCoreScheduler {
     PerCoreScheduler {
         runqueue: VecDeque::new(),
-        sleeping_tasks: heapless::Vec::new(),
+        sleeping_tasks: Vec::new(),
         last_entrance_time: 0,
     }
 }
@@ -217,8 +215,7 @@ pub fn sleep_current_task(time_ms: usize) {
     ctx.scheduler
         .lock()
         .sleeping_tasks
-        .push(ctx.currently_running_task)
-        .unwrap();
+        .push(ctx.currently_running_task);
 
     schedule();
 }
