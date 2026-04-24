@@ -1,13 +1,13 @@
+use alloc::vec::Vec;
+
 use crate::{
     Arch,
     arch::{PhysicalAddressOf, VirtualAddressOf, mmu::PhysicalAddress},
 };
 
-pub const MAX_REGIONS: usize = 16;
-
 pub const ADDRESS_SPACE_EMPTY: AddressSpace = AddressSpace {
     root_pt: PhysicalAddress::ZERO,
-    regions: heapless::Vec::new(),
+    regions: Vec::new(),
 };
 
 #[allow(unused)]
@@ -26,5 +26,5 @@ pub struct VmRegion {
 #[derive(Clone)]
 pub struct AddressSpace {
     pub root_pt: PhysicalAddressOf<Arch>,
-    pub regions: heapless::Vec<VmRegion, MAX_REGIONS>,
+    pub regions: Vec<VmRegion>,
 }

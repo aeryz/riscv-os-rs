@@ -18,13 +18,13 @@ mod syscall;
 mod task;
 mod userspace;
 
+use alloc::vec::Vec;
 pub use debug::*;
 use ksync::SpinLock;
 
 use crate::{
     arch::{Architecture, mmu::VirtualAddress},
     driver::uart,
-    mm::kmalloc,
 };
 
 core::arch::global_asm!(include_str!("start.s"));
@@ -34,7 +34,7 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
-    let mut core_ctxs = heapless::Vec::new();
+    let mut core_ctxs = Vec::new();
 
     setup_core(0, &mut core_ctxs);
     #[cfg(feature = "multi-core")]
@@ -74,22 +74,17 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     core_boot_entry(0);
 }
 
-fn setup_core(
-    core_id: usize,
-    core_ctxs: &mut heapless::Vec<percpu::PerCoreContext, { percpu::MAX_CORES }>,
-) {
+fn setup_core(core_id: usize, core_ctxs: &mut Vec<percpu::PerCoreContext>) {
     let idle_task = task::create_kernel_task(
         VirtualAddress::from_raw(idle_task_main as *const () as usize).unwrap(),
     );
 
-    core_ctxs
-        .push(percpu::PerCoreContext {
-            core_id,
-            scheduler: SpinLock::new(sched::init_per_core_scheduler()),
-            currently_running_task: idle_task,
-            idle_task,
-        })
-        .unwrap();
+    core_ctxs.push(percpu::PerCoreContext {
+        core_id,
+        scheduler: SpinLock::new(sched::init_per_core_scheduler()),
+        currently_running_task: idle_task,
+        idle_task,
+    });
 }
 
 #[cfg(feature = "multi-core")]
