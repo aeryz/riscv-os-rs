@@ -5,6 +5,8 @@
 #[cfg(feature = "riscv-sbi")]
 pub type Arch = arch::Riscv;
 
+extern crate alloc;
+
 mod arch;
 mod debug;
 mod driver;
@@ -31,20 +33,6 @@ core::arch::global_asm!(include_str!("start.s"));
 extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
-
-    let alloc1 = kmalloc(100);
-    let alloc2 = kmalloc(200);
-    let alloc3 = kmalloc(300);
-    log::info!(
-        "Allocated addresses: 0x{:x}, 0x{:x}, 0x{:x}\nSize diffs: 1-2({}), 2-3({})",
-        alloc1.raw(),
-        alloc2.raw(),
-        alloc3.raw(),
-        alloc2.raw() - alloc1.raw(),
-        alloc3.raw() - alloc2.raw(),
-    );
-
-    panic!("");
 
     let mut core_ctxs = heapless::Vec::new();
 
@@ -132,6 +120,7 @@ fn boot_core(core: usize) {
 
 // TODO(aeryz): This contains arch specific code, move it to `arch/boot`
 #[unsafe(naked)]
+#[allow(unused)]
 extern "C" fn core_entry_trampoline() -> ! {
     core::arch::naked_asm!(
         r#"
