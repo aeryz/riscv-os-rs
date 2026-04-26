@@ -49,24 +49,101 @@ enum RegisterOffset {
     /// This applies to the queue selected by writing to QueueSel. Note: QueueSizeMax was
     /// previously known as QueueNumMax.
     QueueSizeMax = 0x34,
+    /// Virtqueue size
+    /// Queue size is the number of elements in the queue. Writing to this register
+    /// notifies the device what size of the queue the driver will use. This applies
+    /// to the queue selected by writing to QueueSel. Note: QueueSize was previously
+    /// known as QueueNum.
     QueueSize = 0x38,
+    /// Virtqueue ready bit
+    /// Writing one (0x1) to this register notifies the device that it can execute requests
+    /// from this virtqueue. Reading from this register returns the last value written to it.
+    /// Both read and write accesses apply to the queue selected by writing to QueueSel.
     QueueReady = 0x44,
+    /// Queue notifier
+    /// Writing a value to this register notifies the device that there are new buffers
+    /// to process in a queue.
     QueueNotify = 0x50,
+    /// Interrupt status
+    /// Reading from this register returns a bit mask of events that caused the device
+    /// interrupt to be asserted. The following events are possible:
+    /// Used Buffer Notification
+    ///    - bit 0 - the interrupt was asserted because the device has used a buffer
+    ///      in at least one of the active virtqueues.
+    /// Configuration Change Notification
+    ///    - bit 1 - the interrupt was asserted because the configuration of the device
+    ///      has changed.
     InterruptStatus = 0x60,
+    /// Interrupt acknowledge
+    /// Writing a value with bits set as defined in InterruptStatus to this register
+    /// notifies the device that events causing the interrupt have been handled.
     InterruptAck = 0x64,
+    /// Device status
+    /// Reading from this register returns the current device status flags. Writing
+    /// non-zero values to this register sets the status flags, indicating the
+    /// driver progress. Writing zero (0x0) to this register triggers a device reset.
+    /// See also p. 4.2.3.1 Device Initialization.
     Status = 0x70,
+    /// Virtqueue’s Descriptor Area 64 bit long physical address
+    /// Writing to these two registers (lower 32 bits of the address to QueueDescLow,
+    /// higher 32 bits to QueueDescHigh) notifies the device about location of the
+    /// Descriptor Area of the queue selected by writing to QueueSel register.
     QueueDescLow = 0x80,
+    /// See `QueueDescLow`
     QueueDescHigh = 0x84,
+    /// Virtqueue’s Driver Area 64 bit long physical address
+    /// Writing to these two registers (lower 32 bits of the address to QueueDriverLow,
+    /// higher 32 bits to QueueDriverHigh) notifies the device about location of the
+    /// Driver Area of the queue selected by writing to QueueSel.
     QueueDriverLow = 0x090,
+    /// See `QueueDriverLow`
     QueueDriverHigh = 0x094,
+    /// Virtqueue’s Device Area 64 bit long physical address
+    /// Writing to these two registers (lower 32 bits of the address to QueueDeviceLow,
+    /// higher 32 bits to QueueDeviceHigh) notifies the device about location of the
+    /// Device Area of the queue selected by writing to QueueSel.
     QueueDeviceLow = 0x0a0,
+    /// See `QueueDeviceLow`
     QueueDeviceHigh = 0x0a4,
+    /// Shared memory id
+    /// Writing to this register selects the shared memory region 2.10 following
+    /// operations on SHMLenLow, SHMLenHigh, SHMBaseLow and SHMBaseHigh apply to.
     SHMSel = 0x0ac,
+    /// Shared memory region 64 bit long length
+    /// These registers return the length of the shared memory region in bytes,
+    /// as defined by the device for the region selected by the SHMSel register.
+    /// The lower 32 bits of the length are read from SHMLenLow and the higher
+    /// 32 bits from SHMLenHigh. Reading from a non-existent region (i.e. where
+    /// the ID written to SHMSel is unused) results in a length of -1.
     SHMLenLow = 0x0b0,
+    /// See `SHMLenLow`
     SHMLenHigh = 0x0b4,
+    /// Shared memory region 64 bit long physical address
+    /// The driver reads these registers to discover the base address of the region
+    /// in physical address space. This address is chosen by the device (or other
+    /// part of the VMM). The lower 32 bits of the address are read from SHMBaseLow
+    /// with the higher 32 bits from SHMBaseHigh. Reading from a non-existent region
+    ///  (i.e. where the ID written to SHMSel is unused) results in a base address of
+    /// 0xffffffffffffffff.
     SHMBaseLow = 0x0b8,
+    /// See `SHMBaseLow`
     SHMBaseHigh = 0x0bc,
+    /// Virtqueue reset bit
+    /// If VIRTIO_F_RING_RESET has been negotiated, writing one (0x1) to this register
+    /// selectively resets the queue. Both read and write accesses apply to the queue
+    /// selected by writing to QueueSel.
     QueueReset = 0x0c0,
+    /// Configuration atomicity value
+    /// Reading from this register returns a value describing a version of the
+    /// device-specific configuration space (see Config). The driver can then access
+    /// the configuration space and, when finished, read ConfigGeneration again.
+    /// If no part of the configuration space has changed between these two
+    /// ConfigGeneration reads, the returned values are identical. If the values
+    /// are different, the configuration space accesses were not atomic and the driver
+    /// has to perform the operations again. See also 2.5.
     ConfigGeneration = 0x0fc,
+    /// Configuration space
+    /// Device-specific configuration space starts at the offset 0x100 and is accessed
+    /// with byte alignment. Its meaning and size depend on the device and the driver.
     Config = 0x100,
 }
