@@ -17,6 +17,7 @@ mod serial_log;
 mod syscall;
 mod task;
 mod userspace;
+mod vfs;
 
 use alloc::vec::Vec;
 pub use debug::*;
@@ -33,6 +34,13 @@ core::arch::global_asm!(include_str!("start.s"));
 extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
+
+    let found = vfs::find_virtio_blk().unwrap();
+    log::info!("Found device id: {found:x}");
+
+    loop {
+        Arch::halt();
+    }
 
     let mut core_ctxs = Vec::new();
 
@@ -192,3 +200,22 @@ extern "C" fn idle_task_main() -> ! {
         }
     }
 }
+
+/*
+File:
+    inode
+
+Directory:
+
+Interface:
+int open(const char *path, int flags, ... /* mode_t mode */ );
+
+ssize_t write(int fd, const void buf[count], size_t count);
+
+ssize_t read(int fd, void buf[count], size_t count);
+
+off_t lseek(int fildes, off_t offset, int whence);
+
+
+
+*/
