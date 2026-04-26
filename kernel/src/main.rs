@@ -25,7 +25,7 @@ use ksync::SpinLock;
 
 use crate::{
     arch::{Architecture, mmu::VirtualAddress},
-    driver::uart,
+    driver::{uart, virtio},
 };
 
 core::arch::global_asm!(include_str!("start.s"));
@@ -35,8 +35,13 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
     serial_log::init();
     log::info!("Kernel starts with hart_id: {hartid}, dtb: 0x{dtb_address:x}",);
 
-    let found = vfs::find_virtio_blk().unwrap();
-    log::info!("Found device id: {found:x}");
+    let blk_device_base = virtio::find_virtio_blk().unwrap();
+    log::info!("Found device id: {blk_device_base:x}");
+
+    match virtio::block::init(blk_device_base) {
+        Ok(_) => log::info!("driver initialized"),
+        Err(_) => log::error!("driver initialization failed"),
+    }
 
     loop {
         Arch::halt();

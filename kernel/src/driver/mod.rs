@@ -1,2 +1,2 @@
 pub mod uart;
-mod virtio;
+pub mod virtio;
