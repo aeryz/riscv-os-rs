@@ -170,18 +170,22 @@ impl Into<u32> for RegisterOffset {
 }
 
 // TODO(aeryz): We only support writing features 0..32 rn
-pub fn init_device(
+pub fn init_device<F: Fn()>(
     device_base: usize,
     device_features: u32,
-    device_init_fn: fn(),
+    device_init_fn: F,
 ) -> Result<(), ()> {
     // 1. Reset the device.
     write32(device_base, RegisterOffset::Status, 0u32);
 
     // 2. Set the ACKNOWLEDGE status bit: the guest OS has noticed the device.
-    write32(device_base, RegisterOffset::Status, Status::Ack);
+    write32(device_base, RegisterOffset::Status, Status::ACK);
 
-    write32(device_base, RegisterOffset::Status, Status::Driver);
+    write32(
+        device_base,
+        RegisterOffset::Status,
+        Status::ACK | Status::DRIVER,
+    );
 
     // 4. Read device feature bits, and write the subset of feature bits understood
     // by the OS and driver to the device. During this step the driver MAY read
@@ -192,12 +196,20 @@ pub fn init_device(
 
     // 5. Set the FEATURES_OK status bit. The driver MUST NOT accept new feature
     // bits after this step.
-    write32(device_base, RegisterOffset::Status, Status::FeaturesOk);
+    write32(
+        device_base,
+        RegisterOffset::Status,
+        Status::ACK | Status::DRIVER | Status::FEATURES_OK,
+    );
 
     // 6. Re-read device status to ensure the FEATURES_OK bit is still set:
     // otherwise, the device does not support our subset of features and the
     // device is unusable.
-    if read32(device_base, RegisterOffset::Status) != Status::FeaturesOk.into() {
+    if let Some(status) = Status::from_bits(read32(device_base, RegisterOffset::Status)) {
+        if !status.contains(Status::FEATURES_OK) {
+            return Err(());
+        }
+    } else {
         return Err(());
     }
 
@@ -208,7 +220,11 @@ pub fn init_device(
     device_init_fn();
 
     // 8. Set the DRIVER_OK status bit. At this point the device is “live”.
-    write32(device_base, RegisterOffset::Status, Status::DriverOk);
+    write32(
+        device_base,
+        RegisterOffset::Status,
+        Status::ACK | Status::DRIVER | Status::FEATURES_OK | Status::DRIVER_OK,
+    );
     Ok(())
 }
 
