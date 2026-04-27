@@ -43,6 +43,9 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
         Err(_) => log::error!("driver initialization failed"),
     }
 
+    virtio::block::operate();
+    // virtio::block::post_operate();
+
     loop {
         Arch::halt();
     }
