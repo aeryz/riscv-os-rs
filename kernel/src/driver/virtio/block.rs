@@ -1,6 +1,9 @@
 #![allow(unused)]
 
-use core::sync::atomic::{self, Ordering};
+use core::{
+    alloc::Layout,
+    sync::atomic::{self, Ordering},
+};
 
 use alloc::vec::Vec;
 use ksync::RwLock;
@@ -18,7 +21,7 @@ use super::Status;
 const QUEUE_SIZE: usize = 16;
 
 static DRIVER: RwLock<VirtioBlkDriver> = RwLock::new(VirtioBlkDriver {
-    virtqueue: [0; 4096],
+    virtqueue: core::ptr::null_mut(),
     desc_ptr: core::ptr::null_mut(),
     avail_ptr: core::ptr::null_mut(),
     used_ptr: core::ptr::null_mut(),
@@ -30,9 +33,8 @@ unsafe impl Sync for VirtioBlkDriver {}
 unsafe impl Send for VirtioBlkDriver {}
 
 #[repr(C)]
-#[repr(align(16))]
 pub struct VirtioBlkDriver {
-    virtqueue: [u8; 4096],
+    virtqueue: *mut u8,
     desc_ptr: *mut Descriptor,
     avail_ptr: *mut AvailableRing<QUEUE_SIZE>,
     used_ptr: *mut UsedRing<QUEUE_SIZE>,
@@ -136,7 +138,10 @@ pub fn init(device_base: usize) -> Result<(), ()> {
     // Device Area to (respectively) the QueueDescLow/QueueDescHigh,
     // QueueDriverLow/QueueDriverHigh and QueueDeviceLow/QueueDeviceHigh register
     // pairs.
-    let base = (&driver.virtqueue as *const u8) as usize;
+    let layout = Layout::from_size_align(4096, 16).unwrap();
+    let ptr = unsafe { alloc::alloc::alloc(layout) };
+    driver.virtqueue = ptr;
+    let base = driver.virtqueue as usize;
 
     let desc_off = align_up(0, 16);
     let desc_ptr = (base + desc_off) as *mut Descriptor;
@@ -201,40 +206,35 @@ pub fn init(device_base: usize) -> Result<(), ()> {
     Ok(())
 }
 
-pub fn operate() {
-    let mut data = [0u8; 512];
-    let hello = b"helloworldomgomg";
-    data[0..hello.len()].copy_from_slice(hello);
+pub fn write(data: &[u8; 512], sector: u64) -> u8 {
     let req1 = VirtioBlkReq {
         ty: VIRTIO_BLK_T_OUT,
         _reserved: 0,
-        sector: 1,
+        sector: sector,
     };
 
     let mut status: u8 = 0xff;
 
     let desc1 = Descriptor {
-        addr: mm::virt_to_phys2((&req1 as *const VirtioBlkReq) as usize) as u64,
+        addr: mm::virt_to_phys((&req1 as *const VirtioBlkReq) as usize) as u64,
         len: size_of::<VirtioBlkReq>() as u32,
         flags: DescriptorFlag::NEXT,
         next: 1,
     };
 
     let desc2 = Descriptor {
-        addr: mm::virt_to_phys2(data.as_ptr() as usize) as u64,
+        addr: mm::virt_to_phys(data.as_ptr() as usize) as u64,
         len: 512,
         flags: DescriptorFlag::NEXT,
         next: 2,
     };
 
     let desc3 = Descriptor {
-        addr: mm::virt_to_phys2((&mut status as *mut u8) as usize) as u64,
+        addr: mm::virt_to_phys((&mut status as *mut u8) as usize) as u64,
         len: 1,
         flags: DescriptorFlag::WRITE,
         next: 0,
     };
-
-    log::info!("here1");
 
     let mut driver = DRIVER.write_lock();
     unsafe {
@@ -282,14 +282,7 @@ pub fn operate() {
     let new_used_idx = unsafe { core::ptr::read_volatile(&used.idx) };
     driver.last_used_idx = new_used_idx;
 
-    log::info!("check this bro {:x} {:x}", desc2.addr, desc1.addr);
-
-    let status_val = unsafe { core::ptr::read_volatile(&status) };
-    if status_val != 0 {
-        log::error!("virtio blk failed");
-    } else {
-        log::info!("we wrote man omgomgomg");
-    }
+    status
 }
 
 pub fn post_operate() {
