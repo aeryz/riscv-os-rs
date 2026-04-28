@@ -5,12 +5,13 @@ use core::{
     sync::atomic::{self, Ordering},
 };
 
-use alloc::vec::Vec;
-use ksync::RwLock;
+use alloc::{boxed::Box, vec::Vec};
+use ksync::{SpinLock, SpinLockGuard};
 
 use crate::{
     driver::virtio::{
-        mmio,
+        VIRTIO_F_VERSION_1,
+        mmio::{self, RegisterOffset},
         virtqueue::{AvailableRing, Descriptor, DescriptorFlag, UsedRing},
     },
     mm,
@@ -20,7 +21,7 @@ use super::Status;
 
 const QUEUE_SIZE: usize = 16;
 
-static DRIVER: RwLock<VirtioBlkDriver> = RwLock::new(VirtioBlkDriver {
+static DRIVER: SpinLock<VirtioBlkDriver> = SpinLock::new(VirtioBlkDriver {
     virtqueue: core::ptr::null_mut(),
     desc_ptr: core::ptr::null_mut(),
     avail_ptr: core::ptr::null_mut(),
@@ -86,15 +87,6 @@ pub fn init(device_base: usize) -> Result<(), ()> {
         // ignore all other fields in zoned.
 
         mmio::write32(device_base, mmio::RegisterOffset::DeviceFeaturesSel, 1u32);
-        let device_features_hi = mmio::read32(device_base, mmio::RegisterOffset::DeviceFeatures);
-
-        const VIRTIO_F_VERSION_1: u32 = 1 << 0;
-        if device_features_hi & VIRTIO_F_VERSION_1 == 0 {
-            panic!("shit")
-        }
-
-        // high 32 bits: accept VIRTIO_F_VERSION_1
-        mmio::write32(device_base, mmio::RegisterOffset::DriverFeaturesSel, 1u32);
         mmio::write32(
             device_base,
             mmio::RegisterOffset::DriverFeatures,
@@ -104,6 +96,8 @@ pub fn init(device_base: usize) -> Result<(), ()> {
         // low 32 bits: accept no block features for now
         mmio::write32(device_base, mmio::RegisterOffset::DriverFeaturesSel, 0u32);
         mmio::write32(device_base, mmio::RegisterOffset::DriverFeatures, 0u32);
+
+        Ok(())
     })?;
 
     // Virtqueue configuration
@@ -132,7 +126,7 @@ pub fn init(device_base: usize) -> Result<(), ()> {
         QUEUE_SIZE as u32,
     );
 
-    let mut driver = DRIVER.write_lock();
+    let mut driver = DRIVER.lock();
 
     // 6. Write physical addresses of the queue’s Descriptor Area, Driver Area and
     // Device Area to (respectively) the QueueDescLow/QueueDescHigh,
@@ -143,58 +137,32 @@ pub fn init(device_base: usize) -> Result<(), ()> {
     driver.virtqueue = ptr;
     let base = driver.virtqueue as usize;
 
-    let desc_off = align_up(0, 16);
-    let desc_ptr = (base + desc_off) as *mut Descriptor;
-    let desc_pa = mm::virt_to_phys(desc_ptr as usize);
-
-    let desc_size = core::mem::size_of::<Descriptor>() * QUEUE_SIZE;
-
-    let avail_off = align_up(desc_off + desc_size, 2);
-    let avail_ptr = (base + avail_off) as *mut AvailableRing<QUEUE_SIZE>;
-    let avail_pa = mm::virt_to_phys(avail_ptr as usize);
-
-    let avail_size = core::mem::size_of::<AvailableRing<QUEUE_SIZE>>();
-
-    let used_off = align_up(avail_off + avail_size, 4);
-    let used_ptr = (base + used_off) as *mut UsedRing<QUEUE_SIZE>;
-    let used_pa = mm::virt_to_phys(used_ptr as usize);
-
-    mmio::write32(
+    let (desc_ptr, mut desc_start) = save_to_virtqueue::<_, 16>(
         device_base,
-        mmio::RegisterOffset::QueueDescLow,
-        desc_pa as u32,
+        base,
+        0,
+        RegisterOffset::QueueDescLow,
+        RegisterOffset::QueueDescHigh,
     );
-    mmio::write32(
-        device_base,
-        mmio::RegisterOffset::QueueDescHigh,
-        ((desc_pa as u64) >> 32) as u32,
-    );
+    let offset = desc_start + size_of::<Descriptor>() * QUEUE_SIZE;
 
-    mmio::write32(
+    let (avail_ptr, avail_start) = save_to_virtqueue::<_, 2>(
         device_base,
-        mmio::RegisterOffset::QueueDriverLow,
-        avail_pa as u32,
+        base,
+        offset,
+        RegisterOffset::QueueDriverLow,
+        RegisterOffset::QueueDriverHigh,
     );
-    mmio::write32(
+    let offset = avail_start + size_of::<AvailableRing<QUEUE_SIZE>>();
+
+    let (used_ptr, _) = save_to_virtqueue::<_, 4>(
         device_base,
-        mmio::RegisterOffset::QueueDriverHigh,
-        ((avail_pa as u64) >> 32) as u32,
+        base,
+        offset,
+        RegisterOffset::QueueDeviceLow,
+        RegisterOffset::QueueDeviceHigh,
     );
 
-    mmio::write32(
-        device_base,
-        mmio::RegisterOffset::QueueDeviceLow,
-        used_pa as u32,
-    );
-    mmio::write32(
-        device_base,
-        mmio::RegisterOffset::QueueDeviceHigh,
-        ((used_pa as u64) >> 32) as u32,
-    );
-
-    assert_eq!(desc_pa % 16, 0);
-    assert_eq!(avail_pa % 2, 0);
-    assert_eq!(used_pa % 4, 0);
     driver.desc_ptr = desc_ptr;
     driver.avail_ptr = avail_ptr;
     driver.used_ptr = used_ptr;
@@ -206,43 +174,126 @@ pub fn init(device_base: usize) -> Result<(), ()> {
     Ok(())
 }
 
-pub fn write(data: &[u8; 512], sector: u64) -> u8 {
-    let req1 = VirtioBlkReq {
+fn save_to_virtqueue<T, const ALIGN: usize>(
+    device_base: usize,
+    virtqueue_base: usize,
+    alignment_base: usize,
+    low_reg: RegisterOffset,
+    high_reg: RegisterOffset,
+) -> (*mut T, usize) {
+    let offset = align_up(alignment_base, ALIGN);
+    let ptr = (virtqueue_base + offset) as *mut T;
+    let ptr_pa = mm::virt_to_phys(ptr as usize);
+    assert_eq!(ptr_pa % ALIGN, 0);
+
+    mmio::write32(device_base, low_reg, ptr_pa as u32);
+    mmio::write32(device_base, high_reg, ((ptr_pa as u64) >> 32) as u32);
+
+    (ptr, offset)
+}
+
+pub unsafe fn write(data: &[u8; 512], sector: u64) -> u8 {
+    let mut driver = DRIVER.lock();
+
+    // NOTE: We are allocating instead of using the stack because the stack can have
+    // any VA at this moment. Say this `write` is called during a user trap.
+    // Then the kernel stack will be somewhere at 0x4fff_xxxx etc. Then
+    // `virt_to_phys` will definitely fail. But the allocation here guarantees
+    // that the `req` will live in the `KERNEL_DIRECT_MAPPING_BASE` space.
+    let req = Box::new(VirtioBlkReqHeader {
         ty: VIRTIO_BLK_T_OUT,
         _reserved: 0,
         sector: sector,
-    };
+    });
 
-    let mut status: u8 = 0xff;
-
-    let desc1 = Descriptor {
-        addr: mm::virt_to_phys((&req1 as *const VirtioBlkReq) as usize) as u64,
-        len: size_of::<VirtioBlkReq>() as u32,
-        flags: DescriptorFlag::NEXT,
-        next: 1,
-    };
-
-    let desc2 = Descriptor {
-        addr: mm::virt_to_phys(data.as_ptr() as usize) as u64,
-        len: 512,
-        flags: DescriptorFlag::NEXT,
-        next: 2,
-    };
-
-    let desc3 = Descriptor {
-        addr: mm::virt_to_phys((&mut status as *mut u8) as usize) as u64,
-        len: 1,
-        flags: DescriptorFlag::WRITE,
-        next: 0,
-    };
-
-    let mut driver = DRIVER.write_lock();
+    let mut status = Box::new(0xffu8);
+    // Write the header as the first param
     unsafe {
-        *driver.desc_ptr = desc1.clone();
-        *driver.desc_ptr.offset(1) = desc2.clone();
-        *driver.desc_ptr.offset(2) = desc3.clone();
+        *driver.desc_ptr = Descriptor {
+            addr: mm::virt_to_phys((req.as_ref() as *const VirtioBlkReqHeader) as usize) as u64,
+            len: size_of::<VirtioBlkReqHeader>() as u32,
+            flags: DescriptorFlag::NEXT,
+            next: 1,
+        };
+    }
 
-        let avail = unsafe { &mut *driver.avail_ptr };
+    // The buffer with size 512 that will be written to the disc goes next
+    unsafe {
+        *driver.desc_ptr.offset(1) = Descriptor {
+            addr: mm::virt_to_phys(data.as_ptr() as usize) as u64,
+            len: 512,
+            flags: DescriptorFlag::NEXT,
+            next: 2,
+        };
+    }
+
+    // Finally we write the status and label it with `WRITE` since the device will
+    // write to this
+    unsafe {
+        *driver.desc_ptr.offset(2) = Descriptor {
+            addr: mm::virt_to_phys((status.as_mut() as *mut u8) as usize) as u64,
+            len: 1,
+            flags: DescriptorFlag::WRITE,
+            next: 0,
+        };
+    }
+
+    driver.operate(status)
+}
+
+pub unsafe fn read(data: &mut [u8; 512], sector: u64) -> u8 {
+    let mut driver = DRIVER.lock();
+
+    // NOTE: We are allocating instead of using the stack because the stack can have
+    // any VA at this moment. Say this `write` is called during a user trap.
+    // Then the kernel stack will be somewhere at 0x4fff_xxxx etc. Then
+    // `virt_to_phys` will definitely fail. But the allocation here guarantees
+    // that the `req` will live in the `KERNEL_DIRECT_MAPPING_BASE` space.
+    let req = Box::new(VirtioBlkReqHeader {
+        ty: VIRTIO_BLK_T_IN,
+        _reserved: 0,
+        sector: sector,
+    });
+
+    let mut status = Box::new(0xffu8);
+
+    // Write the header as the first param
+    unsafe {
+        *driver.desc_ptr = Descriptor {
+            addr: mm::virt_to_phys((req.as_ref() as *const VirtioBlkReqHeader) as usize) as u64,
+            len: size_of::<VirtioBlkReqHeader>() as u32,
+            flags: DescriptorFlag::NEXT,
+            next: 1,
+        };
+    }
+
+    // The buffer with size 512 that will be written to the disc goes next
+    unsafe {
+        *driver.desc_ptr.offset(1) = Descriptor {
+            addr: mm::virt_to_phys(data.as_ptr() as usize) as u64,
+            len: 512,
+            flags: DescriptorFlag::NEXT | DescriptorFlag::WRITE,
+            next: 2,
+        };
+    }
+
+    // Finally we write the status and label it with `WRITE` since the device will
+    // write to this
+    unsafe {
+        *driver.desc_ptr.offset(2) = Descriptor {
+            addr: mm::virt_to_phys((status.as_mut() as *mut u8) as usize) as u64,
+            len: 1,
+            flags: DescriptorFlag::WRITE,
+            next: 0,
+        };
+    }
+
+    driver.operate(status)
+}
+
+impl VirtioBlkDriver {
+    fn operate(&mut self, status: Box<u8>) -> u8 {
+        let avail = unsafe { &mut *self.avail_ptr };
 
         let slot = avail.idx as usize % QUEUE_SIZE;
 
@@ -252,115 +303,27 @@ pub fn write(data: &[u8; 512], sector: u64) -> u8 {
         // make desc[0..2] and avail.ring visible before idx update
         atomic::fence(Ordering::Release);
 
-        let old_idx = core::ptr::read_volatile(&avail.idx);
-        let slot = old_idx as usize % QUEUE_SIZE;
+        avail.idx = avail.idx.wrapping_add(1);
 
-        core::ptr::write_volatile(&mut avail.ring[slot], 0);
-        atomic::fence(Ordering::Release);
-
-        core::ptr::write_volatile(&mut avail.idx, old_idx.wrapping_add(1));
         atomic::fence(Ordering::Release);
 
         // notify queue 0
-        mmio::write32(driver.device_base, mmio::RegisterOffset::QueueNotify, 0u32);
-    }
+        mmio::write32(self.device_base, mmio::RegisterOffset::QueueNotify, 0u32);
 
-    let used = unsafe { &*driver.used_ptr };
+        let used = unsafe { &*self.used_ptr };
 
-    let used_slot = driver.last_used_idx as usize % QUEUE_SIZE;
+        let used_slot = self.last_used_idx as usize % QUEUE_SIZE;
 
-    while unsafe { core::ptr::read_volatile(&used.idx) } == driver.last_used_idx {
-        core::hint::spin_loop();
-    }
+        while unsafe { core::ptr::read_volatile(&used.idx) } == self.last_used_idx {
+            core::hint::spin_loop();
+        }
 
-    core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
+        atomic::fence(Ordering::Acquire);
 
-    let elem = unsafe { core::ptr::read_volatile(&used.used_elem_ring[used_slot]) };
+        let new_used_idx = unsafe { core::ptr::read_volatile(&used.idx) };
+        self.last_used_idx = new_used_idx;
 
-    log::info!("used elem id={} len={}", elem.id, elem.len);
-
-    let new_used_idx = unsafe { core::ptr::read_volatile(&used.idx) };
-    driver.last_used_idx = new_used_idx;
-
-    status
-}
-
-pub fn post_operate() {
-    let mut data: [u8; 512] = [0; 512];
-    let req = VirtioBlkReq {
-        ty: VIRTIO_BLK_T_IN,
-        _reserved: 0,
-        sector: 1,
-    };
-
-    let mut status: u8 = 0;
-
-    let desc1 = Descriptor {
-        addr: mm::virt_to_phys((&req as *const VirtioBlkReq) as usize) as u64,
-        len: size_of::<VirtioBlkReq>() as u32,
-        flags: DescriptorFlag::NEXT,
-        next: 1,
-    };
-
-    let desc2 = Descriptor {
-        addr: mm::virt_to_phys(data.as_ptr() as usize) as u64,
-        len: 512,
-        flags: DescriptorFlag::NEXT | DescriptorFlag::WRITE,
-        next: 2,
-    };
-
-    let desc3 = Descriptor {
-        addr: mm::virt_to_phys((&mut status as *mut u8) as usize) as u64,
-        len: 1,
-        flags: DescriptorFlag::WRITE,
-        next: 0,
-    };
-
-    log::info!("here1");
-
-    let mut driver = DRIVER.write_lock();
-    unsafe {
-        *driver.desc_ptr = desc1.clone();
-        *driver.desc_ptr.offset(1) = desc2.clone();
-        *driver.desc_ptr.offset(2) = desc3.clone();
-
-        let avail = unsafe { &mut *driver.avail_ptr };
-
-        let slot = avail.idx as usize % QUEUE_SIZE;
-
-        // make desc[0..2] and avail.ring visible before idx update
-        atomic::fence(Ordering::Release);
-
-        let old_idx = core::ptr::read_volatile(&avail.idx);
-        let slot = old_idx as usize % QUEUE_SIZE;
-
-        core::ptr::write_volatile(&mut avail.ring[slot], 0);
-        atomic::fence(Ordering::Release);
-
-        core::ptr::write_volatile(&mut avail.idx, old_idx.wrapping_add(1));
-        atomic::fence(Ordering::Release);
-
-        // notify queue 0
-        mmio::write32(driver.device_base, mmio::RegisterOffset::QueueNotify, 0u32);
-    }
-
-    let used = unsafe { &*driver.used_ptr };
-
-    while unsafe { core::ptr::read_volatile(&used.idx) } == driver.last_used_idx {
-        core::hint::spin_loop();
-    }
-
-    core::sync::atomic::fence(core::sync::atomic::Ordering::Acquire);
-
-    let new_used_idx = unsafe { core::ptr::read_volatile(&used.idx) };
-    driver.last_used_idx = new_used_idx;
-
-    let status_val = unsafe { core::ptr::read_volatile(&status) };
-    if status_val != 0 {
-        log::error!("virtio blk failed");
-    } else {
-        log::info!("data: {:?}", &data[0..10]);
-        log::info!("we wrote man omgomgomg");
+        *status
     }
 }
 
@@ -391,7 +354,7 @@ const VIRTIO_BLK_T_SECURE_ERASE: u32 = 14;
 /// The driver enqueues requests to the virtqueues, and they are used by the
 /// device (not necessarily in order). Each request except
 /// VIRTIO_BLK_T_ZONE_APPEND is of form:
-pub struct VirtioBlkReq {
+pub struct VirtioBlkReqHeader {
     ty: u32,
     _reserved: u32,
     /// Indicates the offset (multiplied by 512) where the read or write is to

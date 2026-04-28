@@ -170,7 +170,7 @@ impl Into<u32> for RegisterOffset {
 }
 
 // TODO(aeryz): We only support writing features 0..32 rn
-pub fn init_device<F: Fn()>(
+pub fn init_device<F: Fn() -> Result<(), ()>>(
     device_base: usize,
     device_features: u32,
     device_init_fn: F,
@@ -217,7 +217,7 @@ pub fn init_device<F: Fn()>(
     // for the device, optional per-bus setup, reading and possibly writing
     // the device’s virtio configuration space, and population of virtqueues.
     // TODO(aeryz): still dunno how to do this
-    device_init_fn();
+    device_init_fn()?;
 
     // 8. Set the DRIVER_OK status bit. At this point the device is “live”.
     write32(
