@@ -26,7 +26,8 @@ While the architecture is designed to be ISA-independent, the current implementa
 - [x] UART driver (console I/O)
 - [x] Simple heap allocator
 - [x] Basic synchronization primitives (spinlocks)
-- [x] Basic filesystem support
+- [X] VirtIO block driver for persistent storage.
+- [ ] Basic filesystem support
 - [ ] Improve memory management (allocator, paging, regions)
 - [ ] Process lifecycle (cleanup, reaper, better scheduling)
 - [ ] Expand syscalls + userspace support (ELF loader)
