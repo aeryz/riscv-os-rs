@@ -1,11 +1,5 @@
 use bitflags::bitflags;
 
-pub struct Virtqueue<const QUEUE_SIZE: usize> {
-    desc: *mut Descriptor,
-    avail: *mut AvailableRing<QUEUE_SIZE>,
-    used: *mut UsedRing<QUEUE_SIZE>,
-}
-
 #[derive(Debug, Clone)]
 #[repr(C)]
 pub struct Descriptor {
