@@ -6,8 +6,7 @@ pub mod block;
 pub mod mmio;
 mod virtqueue;
 
-const VIRTIO_DEVICE_ID_BLOCK: u32 = 2;
-
+const VIRTIO_F_VERSION_1: u32 = 1 << 0;
 const VIRTIO0: usize = 0xffffffd61000_1000;
 const VIRTIO_STRIDE: usize = 0x1000;
 const VIRTIO_COUNT: usize = 8;
