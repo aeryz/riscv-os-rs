@@ -43,7 +43,25 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
         Err(_) => log::error!("driver initialization failed"),
     }
 
-    virtio::block::operate();
+    // let status_val = unsafe { core::ptr::read_volatile(&status) };
+    // if status_val != 0 {
+    //     log::error!("virtio blk failed");
+    // } else {
+    //     log::info!("we wrote man omgomgomg");
+    // }
+
+    let msg = b"helloworld";
+    let mut data = Vec::new();
+    data.resize(512, 0);
+    data[0..msg.len()].copy_from_slice(msg);
+    let status = virtio::block::write(data.as_slice().try_into().unwrap(), 1);
+
+    if status != 0 {
+        log::error!("write failed");
+    } else {
+        log::info!("write succeed");
+    }
+
     // virtio::block::post_operate();
 
     loop {

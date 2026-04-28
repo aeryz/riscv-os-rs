@@ -28,15 +28,7 @@ pub fn find_virtio_blk() -> Option<usize> {
     None
 }
 
-pub fn print_features(device_base: usize) {
-    let features_sel = mmio::read32(device_base, RegisterOffset::DeviceFeaturesSel);
-    let features = mmio::read32(device_base, RegisterOffset::DeviceFeatures);
-
-    log::info!("register features selection: {features_sel}, and features: {features}");
-}
-
 bitflags! {
-
     #[repr(transparent)]
     pub struct Status: u32 {
         /// Indicates that the guest OS has found the device and recognized it as a
