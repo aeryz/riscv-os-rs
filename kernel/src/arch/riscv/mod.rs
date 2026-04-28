@@ -108,6 +108,11 @@ impl Architecture for Riscv {
     fn halt() {
         riscv::sbi::shutdown();
     }
+
+    #[cfg(feature = "multi-core")]
+    fn boot_core(core_id: usize) {
+        boot::boot_core(core_id);
+    }
 }
 
 impl MemoryModel for Riscv {

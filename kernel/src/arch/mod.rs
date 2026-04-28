@@ -64,6 +64,9 @@ pub trait Architecture {
     }
 
     fn halt();
+
+    #[cfg(feature = "multi-core")]
+    fn boot_core(core_id: usize);
 }
 
 pub type VirtualAddressOf<Arch> =
