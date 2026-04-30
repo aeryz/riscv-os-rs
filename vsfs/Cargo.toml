@@ -6,3 +6,7 @@ edition.workspace = true
 
 [dependencies]
 bitflags = { workspace = true }
+
+[[bin]]
+name = "tool"
+path = "src/bin/vsfs-tool.rs"
