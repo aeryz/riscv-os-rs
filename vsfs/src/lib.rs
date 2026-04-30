@@ -69,7 +69,7 @@ pub enum Type {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct SuperBlock {
     pub magic: u32,
     pub nblocks: u32,
@@ -79,4 +79,11 @@ pub struct SuperBlock {
     pub inode_table_start: u32,
     pub inode_table_blocks: u32,
     pub data_block_start: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DirEnt {
+    pub inum: u32,
+    pub name: [u8; 28],
 }
