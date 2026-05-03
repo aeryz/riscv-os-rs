@@ -85,5 +85,6 @@ pub struct SuperBlock {
 #[derive(Debug, Clone, Copy)]
 pub struct DirEnt {
     pub inum: u32,
-    pub name: [u8; 28],
+    pub len: u8,
+    pub name: [u8; 27],
 }
