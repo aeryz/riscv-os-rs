@@ -61,7 +61,7 @@ pub struct Metadata {
     pub sz: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 #[repr(u16)]
 pub enum Type {
     Directory = 1,
@@ -82,7 +82,7 @@ pub struct SuperBlock {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct DirEnt {
     pub inum: u32,
     pub name: [u8; 28],

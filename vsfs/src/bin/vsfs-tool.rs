@@ -34,6 +34,7 @@ fn main() -> io::Result<()> {
     write_data_bitmap(&mut img)?;
     write_root_inode(&mut img)?;
     write_root_dir_block(&mut img)?;
+    write_foo_inode(&mut img)?;
     write_foo_dir_block(&mut img)?;
     write_bar_file(&mut img)?;
 
@@ -145,6 +146,24 @@ fn write_root_dir_block(img: &mut File) -> io::Result<()> {
     };
 
     write_at_block(img, ROOT_DATA_BLOCK, bytes)
+}
+
+fn write_foo_inode(img: &mut File) -> io::Result<()> {
+    let mut direct_blocks = [0u32; 12];
+    direct_blocks[0] = FOO_DATA_BLOCK;
+
+    let inode = INode {
+        ty: Type::Directory,
+        link_count: 1,
+        metadata: Metadata {
+            sz: (3 * std::mem::size_of::<DirEnt>()) as u32,
+            dev: 0,
+        },
+        direct_blocks,
+        indirect_block: 0,
+    };
+
+    write_struct(img, inode_offset(FOO_INO), &inode)
 }
 
 fn write_foo_dir_block(img: &mut File) -> io::Result<()> {
