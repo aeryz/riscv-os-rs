@@ -76,14 +76,7 @@ pub fn init() {
             };
             log::info!("entry: {entry:?}");
 
-            let last_char_idx = entry
-                .name
-                .iter()
-                .enumerate()
-                .find_map(|(i, b)| if *b == 0 { Some(i) } else { None })
-                .unwrap_or(28);
-
-            if &entry.name[0..last_char_idx] == b"foo" {
+            if &entry.name[0..entry.len as usize] == b"foo" {
                 Some(entry)
             } else {
                 None
@@ -141,14 +134,7 @@ pub fn init() {
             };
             log::info!("entry: {entry:?}");
 
-            let last_char_idx = entry
-                .name
-                .iter()
-                .enumerate()
-                .find_map(|(i, b)| if *b == 0 { Some(i) } else { None })
-                .unwrap_or(28);
-
-            if &entry.name[0..last_char_idx] == b"bar" {
+            if &entry.name[0..entry.len as usize] == b"bar" {
                 Some(entry)
             } else {
                 None
