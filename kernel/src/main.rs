@@ -47,6 +47,9 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
 
     vfs::init();
 
+    let file = vfs::open(b"/foo/bar").unwrap();
+    log::info!("file: {:?}", file.inode);
+
     let mut core_ctxs = Vec::new();
 
     setup_core(0, &mut core_ctxs);

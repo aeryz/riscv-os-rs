@@ -5,6 +5,7 @@ use ksync::RwLock;
 use crate::vfs::INode;
 
 bitflags! {
+    #[derive(Debug)]
     pub struct FileFlag: usize {
         const R = 1 << 0;
         const W = 1 << 1;
@@ -16,13 +17,15 @@ bitflags! {
     }
 }
 
-/// File reference that is created per task. References to a global file (inode).
+/// File reference that is created per task. References to a global file
+/// (inode).
+#[derive(Debug)]
 pub struct File {
-    inode: Arc<INode>,
-    perm: FileFlag,
-    offset: usize,
+    pub inode: Arc<INode>,
+    pub perm: FileFlag,
+    pub offset: usize,
 }
 
 pub struct FileDescriptor {
-    file: Arc<RwLock<File>>,
+    pub file: Arc<RwLock<File>>,
 }
