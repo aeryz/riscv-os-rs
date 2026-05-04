@@ -209,7 +209,7 @@ fn write_bar_file(img: &mut File) -> io::Result<()> {
 fn dirent(inum: u32, name: &str) -> DirEnt {
     let mut out = DirEnt {
         inum,
-        len: name.len() as u8,
+        name_len: name.len() as u8,
         name: [0u8; 27],
     };
 

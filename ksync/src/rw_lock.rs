@@ -11,8 +11,8 @@ const WRITE_LOCK_HELD: usize = usize::MAX;
 
 /// Spin-based read-write lock.
 ///
-/// Note that this is not a write-aware RWLock, meaning on a read-heavy system, the
-/// writers might starve forever.
+/// Note that this is not a write-aware RWLock, meaning on a read-heavy system,
+/// the writers might starve forever.
 pub struct RwLock<T: ?Sized> {
     readers: AtomicUsize,
     data: UnsafeCell<T>,

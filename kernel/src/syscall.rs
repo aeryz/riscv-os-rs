@@ -7,12 +7,13 @@ use crate::{
 pub const SYSCALL_WRITE: usize = 1;
 pub const SYSCALL_READ: usize = 2;
 pub const SYSCALL_SLEEP_MS: usize = 3;
-// TODO(aeryz): this is not supposed to be a syscall. It's here for convenience only.
+// TODO(aeryz): this is not supposed to be a syscall. It's here for convenience
+// only.
 pub const SYSCALL_SHUTDOWN: usize = 4;
 pub const SYSCALL_EXIT: usize = 5;
 
-// TODO(aeryz): We don't want to implement the syscalls here. But they should directly be implemented
-// in their respective subsystem.
+// TODO(aeryz): We don't want to implement the syscalls here. But they should
+// directly be implemented in their respective subsystem.
 
 #[unsafe(no_mangle)]
 #[inline(never)]
@@ -33,7 +34,11 @@ pub fn dispatch_syscall(tf: &mut TrapFrameOf<Arch>) {
                     .unwrap()
             };
 
-            log::info!("this syscall is called by {}", this_ctx.core_id);
+            log::info!(
+                "this syscall is called by {} with buf: {:?}",
+                this_ctx.core_id,
+                buf
+            );
             crate::printk(utf8_str);
 
             tf.set_syscall_return_value(count);
