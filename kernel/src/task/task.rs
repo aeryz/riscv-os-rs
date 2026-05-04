@@ -71,10 +71,11 @@ pub fn create_task(entry: VirtualAddressOf<Arch>) -> NonNull<Task> {
     address_space.root_pt = process_root_table_pa;
 
     // we don't do heap for now
-    // TODO: we temporarily load the user process from the kernel by just mapping it in the userspace
+    // TODO: we temporarily load the user process from the kernel by just mapping it
+    // in the userspace
 
-    // Assuming the code is at most 32K
-    for i in 0..8 {
+    // Assuming the code is at most 64K
+    for i in 0..16 {
         let va = VirtualAddress::from_raw(0x0000_0000_0001_0000 + 0x1000 * i).unwrap();
         unsafe {
             (*process_root_table).map_vm(

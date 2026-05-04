@@ -1,0 +1,12 @@
+[package]
+name = "vsfs"
+version = "0.1.0"
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bitflags = { workspace = true }
+
+[[bin]]
+name = "tool"
+path = "src/bin/vsfs-tool.rs"
