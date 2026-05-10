@@ -14,6 +14,7 @@ pub enum VfsError {
     DeviceIO,
     Fs,
     AlreadyMounted,
+    OutOfBounds,
     Unknown,
 }
 
@@ -30,6 +31,9 @@ pub trait VNode: Send + Sync {
     /// Writes at most `buf.len()` bytes into this inode starting from the
     /// `offset` and returns the number of bytes written.
     fn write(&self, offset: usize, buf: &[u8]) -> VfsResult<usize>;
+
+    /// Returns the file size.
+    fn sz(&self) -> usize;
 }
 
 pub trait Filesystem: Send + Sync {
@@ -54,6 +58,12 @@ pub struct File {
     pub offset: usize,
 }
 
+pub enum SeekFrom {
+    Start(usize),
+    Current(isize),
+    End(isize),
+}
+
 // TODO(aeryz): There is no caching layer right now
 impl File {
     pub fn read(&mut self, buf: &mut [u8]) -> VfsResult<usize> {
@@ -66,5 +76,29 @@ impl File {
         let n_written = self.inode.write(self.offset, buf)?;
         self.offset += n_written;
         Ok(n_written)
+    }
+
+    pub fn seek(&mut self, offset: SeekFrom) -> VfsResult<()> {
+        let file_size = self.inode.sz();
+        let checked_offset = |start: usize, offset: isize| {
+            if offset >= 0 {
+                start.checked_add(offset as usize)
+            } else {
+                start.checked_sub(offset.unsigned_abs())
+            }
+        };
+        let new_offset = match offset {
+            SeekFrom::Start(offset) => Some(offset),
+            SeekFrom::Current(offset) => checked_offset(self.offset, offset),
+            SeekFrom::End(offset) => checked_offset(file_size, offset),
+        }
+        .ok_or(VfsError::OutOfBounds)?;
+
+        if new_offset >= self.inode.sz() {
+            return Err(VfsError::OutOfBounds);
+        }
+
+        self.offset = new_offset;
+        Ok(())
     }
 }
