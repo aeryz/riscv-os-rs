@@ -19,7 +19,7 @@ const SECTORS_PER_BLOCK: usize = BLOCK_SIZE / SECTOR_SIZE;
 
 pub struct Vsfs<BD: BlockDevice> {
     superblock: SuperBlock,
-    inode_cache: BTreeMap<usize, Arc<INode<BD>>>,
+    inode_cache: SpinLock<BTreeMap<usize, Arc<INode<BD>>>>,
     _marker: PhantomData<BD>,
 }
 
@@ -29,7 +29,7 @@ pub enum Error {}
 #[derivative(Clone(bound = ""))]
 pub struct INode<BD: BlockDevice> {
     inum: usize,
-    fs: Arc<SpinLock<Vsfs<BD>>>,
+    fs: Arc<Vsfs<BD>>,
     inner: Arc<RwLock<INodeInner>>,
     _marker: PhantomData<BD>,
 }
@@ -71,7 +71,7 @@ pub struct DirEnt {
 
 impl<BD: BlockDevice> INode<BD> {
     fn lookup_path(
-        fs: &Arc<SpinLock<Vsfs<BD>>>,
+        fs: &Arc<Vsfs<BD>>,
         inode: ReadLockGuard<'_, INodeInner>,
         path: &[u8],
     ) -> VfsResult<Arc<Self>> {
@@ -269,7 +269,7 @@ struct SuperBlock {
     data_block_start: u32,
 }
 
-pub fn initialize<BD: BlockDevice>() -> VfsResult<Arc<SpinLock<Vsfs<BD>>>> {
+pub fn initialize<BD: BlockDevice>() -> VfsResult<Arc<Vsfs<BD>>> {
     let buf = &mut [0; 512];
     BD::read_sector(0, buf)?;
 
@@ -279,14 +279,14 @@ pub fn initialize<BD: BlockDevice>() -> VfsResult<Arc<SpinLock<Vsfs<BD>>>> {
         return Err(VfsError::Fs);
     }
 
-    let vsfs = Arc::new(SpinLock::new(Vsfs {
+    let vsfs = Arc::new(Vsfs {
         superblock: sb,
-        inode_cache: BTreeMap::new(),
+        inode_cache: SpinLock::new(BTreeMap::new()),
         _marker: PhantomData,
-    }));
+    });
 
-    let root_inode = Vsfs::<BD>::read_inode(vsfs.clone(), 1)?;
-    let _ = vsfs.lock().inode_cache.insert(1, root_inode);
+    // Read will force the root inode to be cached
+    let _ = Vsfs::<BD>::read_inode(vsfs.clone(), 1)?;
 
     Ok(vsfs)
 }
@@ -294,6 +294,7 @@ impl<BD: BlockDevice + 'static + Send + Sync> Filesystem for Vsfs<BD> {
     fn root(&self) -> VfsResult<Arc<dyn VNode>> {
         Ok(self
             .inode_cache
+            .lock()
             .get(&1)
             .expect("root inode always exists")
             .clone())
@@ -301,11 +302,13 @@ impl<BD: BlockDevice + 'static + Send + Sync> Filesystem for Vsfs<BD> {
 }
 
 impl<BD: BlockDevice> Vsfs<BD> {
-    fn read_inode(fs: Arc<SpinLock<Self>>, inum: usize) -> VfsResult<Arc<INode<BD>>> {
-        let mut fs_ = fs.lock();
-        let inode_table_start = fs_.superblock.inode_table_start;
-        match fs_.inode_cache.entry(inum) {
-            Entry::Vacant(inode) => {
+    fn read_inode(fs: Arc<Self>, inum: usize) -> VfsResult<Arc<INode<BD>>> {
+        let inode_table_start = fs.superblock.inode_table_start;
+        let mut cache = fs.inode_cache.lock();
+
+        match cache.entry(inum) {
+            Entry::Vacant(_) => {
+                drop(cache);
                 let i = Arc::new(INode {
                     inum,
                     fs: fs.clone(),
@@ -315,7 +318,7 @@ impl<BD: BlockDevice> Vsfs<BD> {
                     )?)),
                     _marker: PhantomData,
                 });
-                inode.insert_entry(i.clone());
+                let _ = fs.inode_cache.lock().insert(inum, i.clone());
                 Ok(i)
             }
             Entry::Occupied(occupied_entry) => Ok(occupied_entry.get().clone()),
