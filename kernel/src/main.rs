@@ -19,6 +19,7 @@ mod task;
 mod userspace;
 mod vfs;
 
+use ::vfs::SeekFrom;
 use alloc::vec::Vec;
 pub use debug::*;
 use ksync::SpinLock;
@@ -64,6 +65,14 @@ extern "C" fn kmain(hartid: usize, dtb_address: usize) -> ! {
         str::from_utf8_unchecked(&buf[0..n_bytes])
     });
 
+    let n_bytes = file.read(&mut buf).unwrap();
+    log::info!("read {n_bytes} bytes, value is: {}", unsafe {
+        str::from_utf8_unchecked(&buf[0..n_bytes])
+    });
+
+    file.seek(SeekFrom::Start(3)).unwrap();
+    file.write(b"AA").unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
     let n_bytes = file.read(&mut buf).unwrap();
     log::info!("read {n_bytes} bytes, value is: {}", unsafe {
         str::from_utf8_unchecked(&buf[0..n_bytes])

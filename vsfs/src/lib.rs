@@ -250,6 +250,10 @@ impl<BD: BlockDevice + 'static + Send + Sync> VNode for INode<BD> {
         }
         Ok(total_written)
     }
+
+    fn sz(&self) -> usize {
+        self.inner.read_lock().metadata.sz as usize
+    }
 }
 
 #[repr(C)]
