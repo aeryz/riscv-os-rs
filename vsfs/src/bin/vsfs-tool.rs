@@ -1,6 +1,13 @@
-use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+//! This tool is written by Codex. I'm not interested in building a tool
+//! to create a fs image for me. But I'm it is surely very handy.
 
+use std::collections::BTreeSet;
+use std::env;
+use std::fs::{self, File};
+use std::io::{self, Seek, SeekFrom, Write};
+use std::path::Path;
+
+use serde::Deserialize;
 use vsfs::{DirEnt, INodeInner, Metadata, Type};
 
 const BLOCK_SIZE: usize = 4096;
@@ -15,13 +22,6 @@ const INODE_TABLE_BLOCKS: u32 = 5;
 const DATA_BLOCK_START: u32 = 8;
 
 const ROOT_INO: u32 = 1;
-const FOO_INO: u32 = 2;
-const BAR_INO: u32 = 3;
-
-const ROOT_DATA_BLOCK: u32 = 8;
-const FOO_DATA_BLOCK: u32 = 9;
-const BAR_DATA_BLOCK: u32 = 10;
-
 const VSFS_MAGIC: u32 = 0x5653_4653; // "VSFS"
 
 #[repr(C)]
@@ -37,19 +37,461 @@ struct SuperBlock {
     data_block_start: u32,
 }
 
+#[derive(Debug)]
+struct LayoutNode {
+    name: String,
+    kind: LayoutKind,
+}
+
+#[derive(Debug)]
+enum LayoutKind {
+    Directory { children: Vec<LayoutNode> },
+    File { data: Vec<u8> },
+}
+
+#[derive(Debug)]
+struct FsNode {
+    inum: u32,
+    data_blocks: Vec<u32>,
+    name: String,
+    kind: FsNodeKind,
+}
+
+#[derive(Debug)]
+enum FsNodeKind {
+    Directory { children: Vec<FsNode> },
+    File { data: Vec<u8> },
+}
+
+#[derive(Debug, Deserialize)]
+struct JsonLayoutNode {
+    #[serde(rename = "type")]
+    ty: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    contains: Vec<JsonLayoutNode>,
+    #[serde(default)]
+    content: Option<String>,
+    #[serde(default)]
+    contents: Option<String>,
+    #[serde(default)]
+    source: Option<String>,
+}
+
 fn main() -> io::Result<()> {
-    let mut img = File::create("vsfs.img")?;
+    let args: Vec<String> = env::args().collect();
+    let config = ToolConfig::parse(&args).map_err(invalid_input)?;
+
+    let layout = match config.input {
+        Some(ToolInput::Layout(path)) => parse_layout_file(Path::new(&path))?,
+        Some(ToolInput::Root(path)) => parse_root_dir(Path::new(&path))?,
+        None => default_layout(),
+    };
+
+    let fs = allocate_layout(layout).map_err(invalid_input)?;
+    write_image(&config.output_path, &fs)?;
+
+    Ok(())
+}
+
+struct ToolConfig {
+    output_path: String,
+    input: Option<ToolInput>,
+}
+
+enum ToolInput {
+    Layout(String),
+    Root(String),
+}
+
+impl ToolConfig {
+    fn parse(args: &[String]) -> Result<Self, String> {
+        let mut output_path = String::from("vsfs.img");
+        let mut input = None;
+        let mut i = 1;
+
+        while i < args.len() {
+            match args[i].as_str() {
+                "-o" | "--output" => {
+                    i += 1;
+                    output_path = args
+                        .get(i)
+                        .ok_or_else(|| "missing value after --output".to_string())?
+                        .clone();
+                }
+                "-l" | "--layout" => {
+                    i += 1;
+                    let path = args
+                        .get(i)
+                        .ok_or_else(|| "missing value after --layout".to_string())?
+                        .clone();
+                    set_input(&mut input, ToolInput::Layout(path))?;
+                }
+                "-r" | "--root" => {
+                    i += 1;
+                    let path = args
+                        .get(i)
+                        .ok_or_else(|| "missing value after --root".to_string())?
+                        .clone();
+                    set_input(&mut input, ToolInput::Root(path))?;
+                }
+                "-h" | "--help" => {
+                    print_usage(&args[0]);
+                    std::process::exit(0);
+                }
+                arg if input.is_none() => {
+                    set_input(&mut input, ToolInput::Layout(arg.to_string()))?;
+                }
+                arg => return Err(format!("unexpected argument: {arg}")),
+            }
+
+            i += 1;
+        }
+
+        Ok(Self { output_path, input })
+    }
+}
+
+fn set_input(input: &mut Option<ToolInput>, new_input: ToolInput) -> Result<(), String> {
+    if input.is_some() {
+        return Err("--layout and --root are mutually exclusive".to_string());
+    }
+
+    *input = Some(new_input);
+    Ok(())
+}
+
+fn print_usage(program: &str) {
+    eprintln!("usage: {program} [--layout layout.json | --root root-dir] [--output vsfs.img]");
+    eprintln!("       {program} layout.json");
+}
+
+fn default_layout() -> LayoutNode {
+    LayoutNode {
+        name: String::new(),
+        kind: LayoutKind::Directory {
+            children: vec![LayoutNode {
+                name: String::from("foo"),
+                kind: LayoutKind::Directory {
+                    children: vec![LayoutNode {
+                        name: String::from("bar"),
+                        kind: LayoutKind::File {
+                            data: b"hello world\n".to_vec(),
+                        },
+                    }],
+                },
+            }],
+        },
+    }
+}
+
+fn parse_root_dir(path: &Path) -> io::Result<LayoutNode> {
+    let metadata = fs::symlink_metadata(path)?;
+    if !metadata.file_type().is_dir() {
+        return Err(invalid_input(format!(
+            "--root path `{}` is not a directory",
+            path.display()
+        )));
+    }
+
+    Ok(LayoutNode {
+        name: String::new(),
+        kind: LayoutKind::Directory {
+            children: read_dir_children(path)?,
+        },
+    })
+}
+
+fn read_dir_children(path: &Path) -> io::Result<Vec<LayoutNode>> {
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(path)? {
+        entries.push(entry?);
+    }
+    entries.sort_by_key(|entry| entry.file_name());
+
+    let mut children = Vec::with_capacity(entries.len());
+    let mut names = BTreeSet::new();
+    for entry in entries {
+        let child_name = entry.file_name().into_string().map_err(|name| {
+            invalid_input(format!(
+                "path `{}` contains a non-UTF-8 filename: {:?}",
+                path.display(),
+                name
+            ))
+        })?;
+
+        validate_name(&child_name)?;
+        if !names.insert(child_name.clone()) {
+            return Err(invalid_input(format!(
+                "duplicate child name `{}` in directory `{}`",
+                child_name,
+                path.display()
+            )));
+        }
+
+        children.push(layout_from_host_path(&entry.path(), child_name)?);
+    }
+
+    Ok(children)
+}
+
+fn layout_from_host_path(path: &Path, name: String) -> io::Result<LayoutNode> {
+    let metadata = fs::symlink_metadata(path)?;
+    let file_type = metadata.file_type();
+
+    if file_type.is_dir() {
+        Ok(LayoutNode {
+            name,
+            kind: LayoutKind::Directory {
+                children: read_dir_children(path)?,
+            },
+        })
+    } else if file_type.is_file() {
+        Ok(LayoutNode {
+            name,
+            kind: LayoutKind::File {
+                data: fs::read(path)?,
+            },
+        })
+    } else {
+        Err(invalid_input(format!(
+            "unsupported file type at `{}`; only directories and regular files are supported",
+            path.display()
+        )))
+    }
+}
+
+fn validate_name(name: &str) -> io::Result<()> {
+    if name == "." || name == ".." || name.contains('/') {
+        return Err(invalid_input(format!("invalid path component `{name}`")));
+    }
+
+    if name.as_bytes().len() > 27 {
+        return Err(invalid_input(format!(
+            "path component `{name}` is longer than 27 bytes"
+        )));
+    }
+
+    Ok(())
+}
+
+fn parse_layout_file(path: &Path) -> io::Result<LayoutNode> {
+    let input = fs::read_to_string(path)?;
+    let json: JsonLayoutNode = serde_json::from_str(&input)
+        .map_err(|err| invalid_input(format!("invalid layout JSON: {err}")))?;
+    let source_base = path.parent().unwrap_or_else(|| Path::new("."));
+
+    layout_from_json(&json, "", source_base, true).map_err(invalid_input)
+}
+
+fn layout_from_json(
+    json: &JsonLayoutNode,
+    parent_path: &str,
+    source_base: &Path,
+    is_root: bool,
+) -> Result<LayoutNode, String> {
+    let raw_path = json
+        .path
+        .as_deref()
+        .unwrap_or(if is_root { "/" } else { "" });
+    let path = normalize_path(parent_path, raw_path, is_root)?;
+    if !is_root && raw_path.starts_with('/') && absolute_parent(&path) != parent_path {
+        return Err(format!(
+            "absolute child path `{path}` is not contained by `{parent_path}`"
+        ));
+    }
+    let name = if is_root {
+        String::new()
+    } else {
+        path.rsplit('/')
+            .next()
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| format!("invalid non-root path `{path}`"))?
+            .to_string()
+    };
+
+    if name.as_bytes().len() > 27 {
+        return Err(format!("path component `{name}` is longer than 27 bytes"));
+    }
+
+    match json.ty.as_str() {
+        "directory" | "dir" => {
+            let mut children = Vec::new();
+            let mut names = BTreeSet::new();
+            for child in &json.contains {
+                let child = layout_from_json(child, &path, source_base, false)?;
+                if !names.insert(child.name.clone()) {
+                    return Err(format!(
+                        "duplicate child name `{}` in directory `{path}`",
+                        child.name
+                    ));
+                }
+                children.push(child);
+            }
+
+            Ok(LayoutNode {
+                name,
+                kind: LayoutKind::Directory { children },
+            })
+        }
+        "file" => {
+            let data = if let Some(content) = json.content.as_deref() {
+                content.as_bytes().to_vec()
+            } else if let Some(content) = json.contents.as_deref() {
+                content.as_bytes().to_vec()
+            } else if let Some(source) = json.source.as_deref() {
+                let source_path = Path::new(source);
+                let source_path = if source_path.is_absolute() {
+                    source_path.to_path_buf()
+                } else {
+                    source_base.join(source_path)
+                };
+                fs::read(&source_path).map_err(|err| {
+                    format!(
+                        "failed to read source file `{}`: {err}",
+                        source_path.display()
+                    )
+                })?
+            } else {
+                Vec::new()
+            };
+
+            Ok(LayoutNode {
+                name,
+                kind: LayoutKind::File { data },
+            })
+        }
+        other => Err(format!("unknown node type `{other}`")),
+    }
+}
+
+fn normalize_path(parent_path: &str, raw_path: &str, is_root: bool) -> Result<String, String> {
+    if is_root {
+        if raw_path != "/" {
+            return Err("root layout node must have path `/`".to_string());
+        }
+        return Ok(String::from("/"));
+    }
+
+    if raw_path.is_empty() || raw_path.ends_with('/') {
+        return Err(format!("invalid path `{raw_path}`"));
+    }
+
+    let path = if raw_path.starts_with('/') {
+        raw_path.to_string()
+    } else if parent_path == "/" {
+        format!("/{raw_path}")
+    } else {
+        format!("{parent_path}/{raw_path}")
+    };
+
+    if path
+        .split('/')
+        .any(|component| component == "." || component == "..")
+    {
+        return Err(format!("path `{path}` must not contain `.` or `..`"));
+    }
+
+    Ok(path)
+}
+
+fn absolute_parent(normalized_path: &str) -> &str {
+    match normalized_path.rsplit_once('/') {
+        Some(("", _)) => "/",
+        Some((parent, _)) => parent,
+        None => "",
+    }
+}
+
+fn allocate_layout(layout: LayoutNode) -> Result<FsNode, String> {
+    let mut next_inum = ROOT_INO;
+    let mut next_data_block = DATA_BLOCK_START;
+    allocate_node(layout, &mut next_inum, &mut next_data_block)
+}
+
+fn allocate_node(
+    node: LayoutNode,
+    next_inum: &mut u32,
+    next_data_block: &mut u32,
+) -> Result<FsNode, String> {
+    if *next_inum >= NINODES {
+        return Err(format!("too many inodes; image supports {}", NINODES - 1));
+    }
+
+    let inum = *next_inum;
+    *next_inum += 1;
+
+    match node.kind {
+        LayoutKind::Directory { children } => {
+            let mut allocated_children = Vec::with_capacity(children.len());
+            for child in children {
+                allocated_children.push(allocate_node(child, next_inum, next_data_block)?);
+            }
+
+            let dirent_count = 2 + allocated_children.len();
+            let data_blocks = allocate_data_blocks(
+                blocks_needed(dirent_count * std::mem::size_of::<DirEnt>()),
+                next_data_block,
+            )?;
+
+            Ok(FsNode {
+                inum,
+                data_blocks,
+                name: node.name,
+                kind: FsNodeKind::Directory {
+                    children: allocated_children,
+                },
+            })
+        }
+        LayoutKind::File { data } => {
+            let data_blocks = allocate_data_blocks(blocks_needed(data.len()), next_data_block)?;
+            Ok(FsNode {
+                inum,
+                data_blocks,
+                name: node.name,
+                kind: FsNodeKind::File { data },
+            })
+        }
+    }
+}
+
+fn blocks_needed(bytes: usize) -> usize {
+    if bytes == 0 {
+        0
+    } else {
+        bytes.div_ceil(BLOCK_SIZE)
+    }
+}
+
+fn allocate_data_blocks(count: usize, next_data_block: &mut u32) -> Result<Vec<u32>, String> {
+    if count > 12 {
+        return Err("files and directories currently support at most 12 data blocks".to_string());
+    }
+
+    let mut blocks = Vec::with_capacity(count);
+    for _ in 0..count {
+        if *next_data_block >= NBLOCKS {
+            return Err(format!(
+                "too many data blocks; image supports {NBLOCKS} blocks"
+            ));
+        }
+        blocks.push(*next_data_block);
+        *next_data_block += 1;
+    }
+
+    Ok(blocks)
+}
+
+fn write_image(path: &str, root: &FsNode) -> io::Result<()> {
+    let mut img = File::create(path)?;
 
     img.set_len((NBLOCKS as usize * BLOCK_SIZE) as u64)?;
 
     write_superblock(&mut img)?;
-    write_inode_bitmap(&mut img)?;
-    write_data_bitmap(&mut img)?;
-    write_root_inode(&mut img)?;
-    write_root_dir_block(&mut img)?;
-    write_foo_inode(&mut img)?;
-    write_foo_dir_block(&mut img)?;
-    write_bar_file(&mut img)?;
+    write_inode_bitmap(&mut img, root)?;
+    write_data_bitmap(&mut img, root)?;
+    write_node(&mut img, root, ROOT_INO)?;
 
     Ok(())
 }
@@ -99,108 +541,105 @@ fn write_superblock(img: &mut File) -> io::Result<()> {
     write_struct(img, block_offset(SUPER_BLOCK), &sb)
 }
 
+fn write_inode_bitmap(img: &mut File, root: &FsNode) -> io::Result<()> {
+    let mut bitmap = [0u8; BLOCK_SIZE];
+    visit_nodes(root, &mut |node| set_bit(&mut bitmap, node.inum));
+
+    write_at_block(img, INODE_BITMAP_BLOCK, &bitmap)
+}
+
+fn write_data_bitmap(img: &mut File, root: &FsNode) -> io::Result<()> {
+    let mut bitmap = [0u8; BLOCK_SIZE];
+    visit_nodes(root, &mut |node| {
+        for block in &node.data_blocks {
+            set_bit(&mut bitmap, block - DATA_BLOCK_START);
+        }
+    });
+
+    write_at_block(img, DATA_BITMAP_BLOCK, &bitmap)
+}
+
+fn visit_nodes(node: &FsNode, f: &mut impl FnMut(&FsNode)) {
+    f(node);
+    if let FsNodeKind::Directory { children } = &node.kind {
+        for child in children {
+            visit_nodes(child, f);
+        }
+    }
+}
+
 fn set_bit(bitmap: &mut [u8], bit: u32) {
     let byte = bit / 8;
     let off = bit % 8;
     bitmap[byte as usize] |= 1 << off;
 }
 
-fn write_inode_bitmap(img: &mut File) -> io::Result<()> {
-    let mut bitmap = [0u8; BLOCK_SIZE];
+fn write_node(img: &mut File, node: &FsNode, parent_inum: u32) -> io::Result<()> {
+    match &node.kind {
+        FsNodeKind::Directory { children } => {
+            write_dir_inode(img, node, children)?;
+            write_dir_blocks(img, node, parent_inum, children)?;
 
-    set_bit(&mut bitmap, ROOT_INO);
-    set_bit(&mut bitmap, FOO_INO);
-    set_bit(&mut bitmap, BAR_INO);
+            for child in children {
+                write_node(img, child, node.inum)?;
+            }
+        }
+        FsNodeKind::File { data } => write_file(img, node, data)?,
+    }
 
-    write_at_block(img, INODE_BITMAP_BLOCK, &bitmap)
+    Ok(())
 }
 
-fn write_data_bitmap(img: &mut File) -> io::Result<()> {
-    let mut bitmap = [0u8; BLOCK_SIZE];
-
-    // Data bitmap is usually relative to DATA_BLOCK_START.
-    set_bit(&mut bitmap, ROOT_DATA_BLOCK - DATA_BLOCK_START);
-    set_bit(&mut bitmap, FOO_DATA_BLOCK - DATA_BLOCK_START);
-    set_bit(&mut bitmap, BAR_DATA_BLOCK - DATA_BLOCK_START);
-
-    write_at_block(img, DATA_BITMAP_BLOCK, &bitmap)
-}
-
-fn write_root_inode(img: &mut File) -> io::Result<()> {
+fn write_dir_inode(img: &mut File, node: &FsNode, children: &[FsNode]) -> io::Result<()> {
     let mut direct_blocks = [0u32; 12];
-    direct_blocks[0] = ROOT_DATA_BLOCK;
+    direct_blocks[..node.data_blocks.len()].copy_from_slice(&node.data_blocks);
 
     let inode = INodeInner {
         ty: Type::Directory,
         link_count: 1,
         metadata: Metadata {
-            sz: (3 * std::mem::size_of::<DirEnt>()) as u32,
+            sz: ((2 + children.len()) * std::mem::size_of::<DirEnt>()) as u32,
             dev: 0,
         },
         direct_blocks,
         indirect_block: 0,
     };
 
-    write_struct(img, inode_offset(ROOT_INO), &inode)
+    write_struct(img, inode_offset(node.inum), &inode)
 }
 
-fn write_root_dir_block(img: &mut File) -> io::Result<()> {
-    let entries = [
-        dirent(ROOT_INO, "."),
-        dirent(ROOT_INO, ".."),
-        dirent(FOO_INO, "foo"),
-    ];
+fn write_dir_blocks(
+    img: &mut File,
+    node: &FsNode,
+    parent_inum: u32,
+    children: &[FsNode],
+) -> io::Result<()> {
+    let mut entries = Vec::with_capacity(2 + children.len());
+    entries.push(dirent(node.inum, "."));
+    entries.push(dirent(parent_inum, ".."));
+    for child in children {
+        entries.push(dirent(child.inum, &child.name));
+    }
 
     let bytes = unsafe {
         std::slice::from_raw_parts(
             entries.as_ptr() as *const u8,
-            std::mem::size_of_val(&entries),
+            std::mem::size_of_val(entries.as_slice()),
         )
     };
 
-    write_at_block(img, ROOT_DATA_BLOCK, bytes)
+    for (block_idx, block) in node.data_blocks.iter().enumerate() {
+        let start = block_idx * BLOCK_SIZE;
+        let end = usize::min(start + BLOCK_SIZE, bytes.len());
+        write_at_block(img, *block, &bytes[start..end])?;
+    }
+
+    Ok(())
 }
 
-fn write_foo_inode(img: &mut File) -> io::Result<()> {
+fn write_file(img: &mut File, node: &FsNode, data: &[u8]) -> io::Result<()> {
     let mut direct_blocks = [0u32; 12];
-    direct_blocks[0] = FOO_DATA_BLOCK;
-
-    let inode = INodeInner {
-        ty: Type::Directory,
-        link_count: 1,
-        metadata: Metadata {
-            sz: (3 * std::mem::size_of::<DirEnt>()) as u32,
-            dev: 0,
-        },
-        direct_blocks,
-        indirect_block: 0,
-    };
-
-    write_struct(img, inode_offset(FOO_INO), &inode)
-}
-
-fn write_foo_dir_block(img: &mut File) -> io::Result<()> {
-    let entries = [
-        dirent(FOO_INO, "."),
-        dirent(ROOT_INO, ".."),
-        dirent(BAR_INO, "bar"),
-    ];
-
-    let bytes = unsafe {
-        std::slice::from_raw_parts(
-            entries.as_ptr() as *const u8,
-            std::mem::size_of_val(&entries),
-        )
-    };
-
-    write_at_block(img, FOO_DATA_BLOCK, bytes)
-}
-
-fn write_bar_file(img: &mut File) -> io::Result<()> {
-    let data = b"hello world\n";
-
-    let mut direct_blocks = [0u32; 12];
-    direct_blocks[0] = BAR_DATA_BLOCK;
+    direct_blocks[..node.data_blocks.len()].copy_from_slice(&node.data_blocks);
 
     let inode = INodeInner {
         ty: Type::File,
@@ -213,8 +652,13 @@ fn write_bar_file(img: &mut File) -> io::Result<()> {
         indirect_block: 0,
     };
 
-    write_struct(img, inode_offset(BAR_INO), &inode)?;
-    write_at_block(img, BAR_DATA_BLOCK, data)?;
+    write_struct(img, inode_offset(node.inum), &inode)?;
+
+    for (block_idx, block) in node.data_blocks.iter().enumerate() {
+        let start = block_idx * BLOCK_SIZE;
+        let end = usize::min(start + BLOCK_SIZE, data.len());
+        write_at_block(img, *block, &data[start..end])?;
+    }
 
     Ok(())
 }
@@ -232,4 +676,8 @@ fn dirent(inum: u32, name: &str) -> DirEnt {
     out.name[..bytes.len()].copy_from_slice(bytes);
 
     out
+}
+
+fn invalid_input(err: impl Into<String>) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, err.into())
 }

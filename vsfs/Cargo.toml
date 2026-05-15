@@ -9,9 +9,11 @@ bitflags = { workspace = true }
 vfs = { workspace = true }
 ksync = { workspace = true }
 derivative = { version = "2.2.0", features = ["use_core"] }
+serde = { version = "1.0.228", features = ["derive"], optional = true }
+serde_json = { version = "=1.0.140", optional = true }
 
 [features]
-host-tool = []
+host-tool = ["dep:serde", "dep:serde_json"]
 
 [[bin]]
 name = "tool"
